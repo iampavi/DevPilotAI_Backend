@@ -14,4 +14,10 @@ public interface IProjectService
     Task<Result<ProjectSettingsDto>> GetProjectSettingsAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<Result<ProjectSettingsDto>> UpdateProjectSettingsAsync(Guid projectId, UpdateProjectSettingsDto dto, CancellationToken cancellationToken = default);
     Task<Result<ProjectStatisticsDto>> GetProjectStatisticsAsync(Guid projectId, CancellationToken cancellationToken = default);
+
+    Task<Result<ProjectDto>> RegisterLocalProjectAsync(Guid workspaceId, RegisterLocalDto dto, CancellationToken cancellationToken = default);
+    Task<Result<ProjectImportJobDto>> ImportZipProjectAsync(Guid workspaceId, string name, Stream zipStream, string fileName, CancellationToken cancellationToken = default);
+    Task<Result<ProjectImportJobDto>> ImportGitProjectAsync(Guid workspaceId, ImportGitDto dto, CancellationToken cancellationToken = default);
+    Task<Result<IReadOnlyList<ProjectImportJobDto>>> GetProjectImportJobsAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task<Result<ProjectImportJobDto>> GetProjectImportJobByIdAsync(Guid jobId, CancellationToken cancellationToken = default);
 }

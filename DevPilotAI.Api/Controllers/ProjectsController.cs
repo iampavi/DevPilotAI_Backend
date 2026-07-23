@@ -1,6 +1,7 @@
 using DevPilotAI.Application.Common.Interfaces;
 using DevPilotAI.Application.DTOs.Project;
 using DevPilotAI.Shared.Common;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace DevPilotAI.Api.Controllers;
@@ -160,5 +161,110 @@ public class ProjectsController : ApiControllerBase
         }
 
         return Ok(ApiResponse<ProjectStatisticsDto>.Success(result.Value));
+    }
+
+    [HttpPost("/api/workspaces/{workspaceId:guid}/projects/import/local")]
+    public async Task<ActionResult<ApiResponse<ProjectDto>>> RegisterLocal(
+        Guid workspaceId,
+        [FromBody] RegisterLocalDto dto,
+        CancellationToken cancellationToken)
+    {
+        var result = await _projectService.RegisterLocalProjectAsync(workspaceId, dto, cancellationToken);
+
+        if (result.IsFailure)
+        {
+            if (result.Error.Code == "Workspace.NotFound")
+            {
+                return NotFound(ApiResponse<ProjectDto>.Failure(result.Error.Message, result.Error.Code));
+            }
+            return BadRequest(ApiResponse<ProjectDto>.Failure(result.Error.Message, result.Error.Code));
+        }
+
+        return CreatedAtAction(nameof(GetProject), new { id = result.Value.Id }, ApiResponse<ProjectDto>.Success(result.Value, "Local project registered successfully."));
+    }
+
+    [HttpPost("/api/workspaces/{workspaceId:guid}/projects/import/zip")]
+    public async Task<ActionResult<ApiResponse<ProjectImportJobDto>>> ImportZip(
+        Guid workspaceId,
+        [FromForm] string name,
+        IFormFile file,
+        CancellationToken cancellationToken)
+    {
+        if (file == null || file.Length == 0)
+        {
+            return BadRequest(ApiResponse<ProjectImportJobDto>.Failure("No file was uploaded.", "Project.NoFileUploaded"));
+        }
+
+        using var stream = file.OpenReadStream();
+        var result = await _projectService.ImportZipProjectAsync(workspaceId, name, stream, file.FileName, cancellationToken);
+
+        if (result.IsFailure)
+        {
+            if (result.Error.Code == "Workspace.NotFound")
+            {
+                return NotFound(ApiResponse<ProjectImportJobDto>.Failure(result.Error.Message, result.Error.Code));
+            }
+            return BadRequest(ApiResponse<ProjectImportJobDto>.Failure(result.Error.Message, result.Error.Code));
+        }
+
+        return Accepted(ApiResponse<ProjectImportJobDto>.Success(result.Value, "ZIP import queued. Check job status for progress."));
+    }
+
+    [HttpPost("/api/workspaces/{workspaceId:guid}/projects/import/git")]
+    public async Task<ActionResult<ApiResponse<ProjectImportJobDto>>> ImportGit(
+        Guid workspaceId,
+        [FromBody] ImportGitDto dto,
+        CancellationToken cancellationToken)
+    {
+        var result = await _projectService.ImportGitProjectAsync(workspaceId, dto, cancellationToken);
+
+        if (result.IsFailure)
+        {
+            if (result.Error.Code == "Workspace.NotFound")
+            {
+                return NotFound(ApiResponse<ProjectImportJobDto>.Failure(result.Error.Message, result.Error.Code));
+            }
+            return BadRequest(ApiResponse<ProjectImportJobDto>.Failure(result.Error.Message, result.Error.Code));
+        }
+
+        return Accepted(ApiResponse<ProjectImportJobDto>.Success(result.Value, "Git clone and import queued. Check job status for progress."));
+    }
+
+    [HttpGet("{projectId:guid}/import-jobs")]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<ProjectImportJobDto>>>> GetProjectImportJobs(
+        Guid projectId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _projectService.GetProjectImportJobsAsync(projectId, cancellationToken);
+
+        if (result.IsFailure)
+        {
+            if (result.Error.Code == "Project.NotFound")
+            {
+                return NotFound(ApiResponse<IReadOnlyList<ProjectImportJobDto>>.Failure(result.Error.Message, result.Error.Code));
+            }
+            return BadRequest(ApiResponse<IReadOnlyList<ProjectImportJobDto>>.Failure(result.Error.Message, result.Error.Code));
+        }
+
+        return Ok(ApiResponse<IReadOnlyList<ProjectImportJobDto>>.Success(result.Value));
+    }
+
+    [HttpGet("/api/projects/import-jobs/{jobId:guid}")]
+    public async Task<ActionResult<ApiResponse<ProjectImportJobDto>>> GetProjectImportJob(
+        Guid jobId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _projectService.GetProjectImportJobByIdAsync(jobId, cancellationToken);
+
+        if (result.IsFailure)
+        {
+            if (result.Error.Code == "ImportJob.NotFound")
+            {
+                return NotFound(ApiResponse<ProjectImportJobDto>.Failure(result.Error.Message, result.Error.Code));
+            }
+            return BadRequest(ApiResponse<ProjectImportJobDto>.Failure(result.Error.Message, result.Error.Code));
+        }
+
+        return Ok(ApiResponse<ProjectImportJobDto>.Success(result.Value));
     }
 }

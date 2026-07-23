@@ -11,6 +11,7 @@ public interface IApplicationDbContext
     DbSet<ProjectStatistics> ProjectStatistics { get; }
     DbSet<ProjectIndex> ProjectIndexes { get; }
     DbSet<RefreshToken> RefreshTokens { get; }
+    DbSet<ProjectImportJob> ProjectImportJobs { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken);
     int SaveChanges();

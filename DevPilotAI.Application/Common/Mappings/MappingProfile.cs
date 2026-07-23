@@ -24,6 +24,9 @@ public class MappingProfile : Profile
         CreateMap<ProjectIndex, ProjectIndexDto>()
             .ForMember(dest => dest.IndexStatus, opt => opt.MapFrom(src => src.IndexStatus.ToString()));
         CreateMap<ApplicationUser, UserDto>();
+        CreateMap<ProjectImportJob, ProjectImportJobDto>()
+            .ForMember(dest => dest.ImportType, opt => opt.MapFrom(src => src.ImportType.ToString()))
+            .ForMember(dest => dest.Status, opt => opt.MapFrom(src => src.Status.ToString()));
 
         // DTO to Entity (Write/Create/Update mappings - validated using MemberList.Source)
         CreateMap<CreateWorkspaceDto, Workspace>(MemberList.Source);

@@ -20,6 +20,8 @@ public class ProjectServiceTests : IDisposable
     private readonly ProjectService _service;
     private readonly Mock<IDateTimeProvider> _dateTimeProviderMock;
     private readonly Mock<ICurrentUserService> _currentUserServiceMock;
+    private readonly Mock<IFileStorageService> _fileStorageServiceMock;
+    private readonly Mock<IProjectImportQueue> _projectImportQueueMock;
     private readonly DbContextOptions<ApplicationDbContext> _dbOptions;
 
     public ProjectServiceTests()
@@ -50,6 +52,9 @@ public class ProjectServiceTests : IDisposable
         _context.Users.Add(systemUser);
         _context.SaveChanges();
 
+        _fileStorageServiceMock = new Mock<IFileStorageService>();
+        _projectImportQueueMock = new Mock<IProjectImportQueue>();
+
         var configuration = new MapperConfiguration(cfg =>
         {
             cfg.AddProfile<MappingProfile>();
@@ -57,7 +62,7 @@ public class ProjectServiceTests : IDisposable
         _mapper = configuration.CreateMapper();
 
         var logger = NullLogger<ProjectService>.Instance;
-        _service = new ProjectService(_context, _mapper, logger);
+        _service = new ProjectService(_context, _mapper, _fileStorageServiceMock.Object, _projectImportQueueMock.Object, logger);
     }
 
     [Fact]

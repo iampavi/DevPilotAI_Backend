@@ -79,6 +79,14 @@ public static class DependencyInjection
 
         services.AddScoped<IIdentityService, IdentityService>();
 
+        // Ingestion & Storage services
+        services.AddSingleton<IFileStorageService, LocalStorageService>();
+        services.AddSingleton<IFileScanner, NoOpFileScanner>();
+        services.AddScoped<IGitRepositoryService, GitRepositoryService>();
+        services.AddScoped<IImportProgressPublisher, ImportProgressPublisher>();
+        services.AddSingleton<IProjectImportQueue, ProjectImportQueue>();
+        services.AddHostedService<ProjectImportBackgroundWorker>();
+
         return services;
     }
 }

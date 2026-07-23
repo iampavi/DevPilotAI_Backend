@@ -1,4 +1,5 @@
 using AutoMapper;
+using System.IO;
 using DevPilotAI.Application.Common.Interfaces;
 using DevPilotAI.Application.DTOs.Project;
 using DevPilotAI.Domain.Entities;
@@ -14,15 +15,21 @@ public class ProjectService : IProjectService
 {
     private readonly IApplicationDbContext _context;
     private readonly IMapper _mapper;
+    private readonly IFileStorageService _storageService;
+    private readonly IProjectImportQueue _importQueue;
     private readonly ILogger<ProjectService> _logger;
 
     public ProjectService(
         IApplicationDbContext context,
         IMapper mapper,
+        IFileStorageService storageService,
+        IProjectImportQueue importQueue,
         ILogger<ProjectService> logger)
     {
         _context = context;
         _mapper = mapper;
+        _storageService = storageService;
+        _importQueue = importQueue;
         _logger = logger;
     }
 
@@ -286,5 +293,213 @@ public class ProjectService : IProjectService
 
         var dto = _mapper.Map<ProjectStatisticsDto>(statistics);
         return Result.Success(dto);
+    }
+
+    public async Task<Result<ProjectDto>> RegisterLocalProjectAsync(Guid workspaceId, RegisterLocalDto dto, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Registering local folder project {Name} in workspace {WorkspaceId}", dto.Name, workspaceId);
+
+        var workspaceExists = await _context.Workspaces.AnyAsync(w => w.Id == workspaceId, cancellationToken);
+        if (!workspaceExists)
+        {
+            return Result.Failure<ProjectDto>(new Error("Workspace.NotFound", "Workspace not found."));
+        }
+
+        var isDuplicate = await _context.Projects.AnyAsync(p => p.WorkspaceId == workspaceId && p.Name == dto.Name, cancellationToken);
+        if (isDuplicate)
+        {
+            return Result.Failure<ProjectDto>(new Error("Project.DuplicateName", "Project name is already taken."));
+        }
+
+        if (!Directory.Exists(dto.SourceLocation))
+        {
+            return Result.Failure<ProjectDto>(new Error("Project.InvalidLocation", "The specified local directory does not exist."));
+        }
+
+        var project = new Project
+        {
+            WorkspaceId = workspaceId,
+            Name = dto.Name,
+            SourceLocation = dto.SourceLocation,
+            ProjectType = ProjectType.LocalFolder,
+            Settings = new ProjectSettings(),
+            Statistics = new ProjectStatistics(),
+            Index = new ProjectIndex()
+        };
+
+        var job = new ProjectImportJob
+        {
+            ProjectId = project.Id,
+            ImportType = ImportType.LocalFolder,
+            Status = JobStatus.Completed,
+            Progress = 100,
+            StartedAt = DateTime.UtcNow,
+            CompletedAt = DateTime.UtcNow
+        };
+
+        _context.Projects.Add(project);
+        _context.ProjectImportJobs.Add(job);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return Result.Success(_mapper.Map<ProjectDto>(project));
+    }
+
+    public async Task<Result<ProjectImportJobDto>> ImportZipProjectAsync(Guid workspaceId, string name, Stream zipStream, string fileName, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Importing ZIP project {Name} in workspace {WorkspaceId}", name, workspaceId);
+
+        var workspaceExists = await _context.Workspaces.AnyAsync(w => w.Id == workspaceId, cancellationToken);
+        if (!workspaceExists)
+        {
+            return Result.Failure<ProjectImportJobDto>(new Error("Workspace.NotFound", "Workspace not found."));
+        }
+
+        var isDuplicate = await _context.Projects.AnyAsync(p => p.WorkspaceId == workspaceId && p.Name == name, cancellationToken);
+        if (isDuplicate)
+        {
+            return Result.Failure<ProjectImportJobDto>(new Error("Project.DuplicateName", "Project name is already taken."));
+        }
+
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        if (ext != ".zip")
+        {
+            return Result.Failure<ProjectImportJobDto>(new Error("Project.InvalidExtension", "Only .zip files are allowed."));
+        }
+
+        // Project entity creation
+        var project = new Project
+        {
+            WorkspaceId = workspaceId,
+            Name = name,
+            ProjectType = ProjectType.ZipUpload,
+            Settings = new ProjectSettings(),
+            Statistics = new ProjectStatistics(),
+            Index = new ProjectIndex()
+        };
+
+        // Create job
+        var jobId = Guid.NewGuid();
+        var job = new ProjectImportJob
+        {
+            Id = jobId,
+            ProjectId = project.Id,
+            ImportType = ImportType.ZipUpload,
+            Status = JobStatus.Pending,
+            Progress = 0,
+            StartedAt = DateTime.UtcNow
+        };
+
+        // Save ZIP to local storage "Uploads" folder temporarily
+        var storageFileName = $"{jobId}.zip";
+        await _storageService.SaveFileAsync("Uploads", storageFileName, zipStream, cancellationToken);
+
+        _context.Projects.Add(project);
+        _context.ProjectImportJobs.Add(job);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        // Queue background job
+        var queueItem = new ImportJobItem(
+            JobId: jobId,
+            ProjectId: project.Id,
+            ImportType: ImportType.ZipUpload,
+            FilePath: storageFileName
+        );
+        await _importQueue.QueueImportJobAsync(queueItem);
+
+        return Result.Success(_mapper.Map<ProjectImportJobDto>(job));
+    }
+
+    public async Task<Result<ProjectImportJobDto>> ImportGitProjectAsync(Guid workspaceId, ImportGitDto dto, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Importing Git project {Name} in workspace {WorkspaceId}", dto.Name, workspaceId);
+
+        var workspaceExists = await _context.Workspaces.AnyAsync(w => w.Id == workspaceId, cancellationToken);
+        if (!workspaceExists)
+        {
+            return Result.Failure<ProjectImportJobDto>(new Error("Workspace.NotFound", "Workspace not found."));
+        }
+
+        var isDuplicate = await _context.Projects.AnyAsync(p => p.WorkspaceId == workspaceId && p.Name == dto.Name, cancellationToken);
+        if (isDuplicate)
+        {
+            return Result.Failure<ProjectImportJobDto>(new Error("Project.DuplicateName", "Project name is already taken."));
+        }
+
+        // Map ProjectType based on repository URL
+        var urlLower = dto.RepositoryUrl.ToLowerInvariant();
+        var projectType = ProjectType.GitHub;
+        if (urlLower.Contains("gitlab.com")) projectType = ProjectType.GitLab;
+        else if (urlLower.Contains("bitbucket.org")) projectType = ProjectType.Bitbucket;
+        else if (urlLower.Contains("dev.azure.com") || urlLower.Contains("visualstudio.com")) projectType = ProjectType.AzureDevOps;
+
+        // Project entity creation
+        var project = new Project
+        {
+            WorkspaceId = workspaceId,
+            Name = dto.Name,
+            ProjectType = projectType,
+            Settings = new ProjectSettings(),
+            Statistics = new ProjectStatistics(),
+            Index = new ProjectIndex()
+        };
+
+        // Create job
+        var jobId = Guid.NewGuid();
+        var job = new ProjectImportJob
+        {
+            Id = jobId,
+            ProjectId = project.Id,
+            ImportType = ImportType.GitRepository,
+            Status = JobStatus.Pending,
+            Progress = 0,
+            StartedAt = DateTime.UtcNow
+        };
+
+        _context.Projects.Add(project);
+        _context.ProjectImportJobs.Add(job);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        // Queue background job
+        var queueItem = new ImportJobItem(
+            JobId: jobId,
+            ProjectId: project.Id,
+            ImportType: ImportType.GitRepository,
+            GitUrl: dto.RepositoryUrl,
+            GitBranch: dto.Branch,
+            PersonalAccessToken: dto.PersonalAccessToken // Discarded from DB, passed only to background channel
+        );
+        await _importQueue.QueueImportJobAsync(queueItem);
+
+        return Result.Success(_mapper.Map<ProjectImportJobDto>(job));
+    }
+
+    public async Task<Result<IReadOnlyList<ProjectImportJobDto>>> GetProjectImportJobsAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        var projectExists = await _context.Projects.AnyAsync(p => p.Id == projectId, cancellationToken);
+        if (!projectExists)
+        {
+            return Result.Failure<IReadOnlyList<ProjectImportJobDto>>(new Error("Project.NotFound", "Project not found."));
+        }
+
+        var jobs = await _context.ProjectImportJobs
+            .Where(j => j.ProjectId == projectId)
+            .OrderByDescending(j => j.StartedAt)
+            .ToListAsync(cancellationToken);
+
+        var dtos = _mapper.Map<List<ProjectImportJobDto>>(jobs);
+        return Result.Success<IReadOnlyList<ProjectImportJobDto>>(dtos);
+    }
+
+    public async Task<Result<ProjectImportJobDto>> GetProjectImportJobByIdAsync(Guid jobId, CancellationToken cancellationToken = default)
+    {
+        var job = await _context.ProjectImportJobs
+            .FirstOrDefaultAsync(j => j.Id == jobId, cancellationToken);
+
+        if (job == null)
+        {
+            return Result.Failure<ProjectImportJobDto>(new Error("ImportJob.NotFound", "Project import job not found."));
+        }
+
+        return Result.Success(_mapper.Map<ProjectImportJobDto>(job));
     }
 }

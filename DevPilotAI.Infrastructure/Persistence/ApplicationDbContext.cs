@@ -28,6 +28,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<ProjectStatistics> ProjectStatistics => Set<ProjectStatistics>();
     public DbSet<ProjectIndex> ProjectIndexes => Set<ProjectIndex>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<ProjectImportJob> ProjectImportJobs => Set<ProjectImportJob>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
