@@ -3,7 +3,7 @@ using DevPilotAI.Domain.Enums;
 
 namespace DevPilotAI.Domain.Entities;
 
-public class ProjectIndex : AuditableEntity
+public class ProjectIndex : AuditableSoftDeleteEntity
 {
     public Guid ProjectId { get; set; }
     public Project Project { get; set; } = null!;

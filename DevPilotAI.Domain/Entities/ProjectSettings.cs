@@ -2,7 +2,7 @@ using DevPilotAI.Domain.Common;
 
 namespace DevPilotAI.Domain.Entities;
 
-public class ProjectSettings : AuditableEntity
+public class ProjectSettings : AuditableSoftDeleteEntity
 {
     public Guid ProjectId { get; set; }
     public Project Project { get; set; } = null!;

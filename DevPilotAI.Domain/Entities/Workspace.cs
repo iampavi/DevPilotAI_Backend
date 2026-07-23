@@ -2,7 +2,7 @@ using DevPilotAI.Domain.Common;
 
 namespace DevPilotAI.Domain.Entities;
 
-public class Workspace : AuditableEntity
+public class Workspace : AuditableSoftDeleteEntity
 {
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }

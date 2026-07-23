@@ -2,6 +2,7 @@ using DevPilotAI.Api.Configuration;
 using DevPilotAI.Api.Middleware;
 using DevPilotAI.Application;
 using DevPilotAI.Infrastructure;
+using DevPilotAI.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Serilog;
 
@@ -77,6 +78,20 @@ try
             await context.Response.WriteAsJsonAsync(response);
         }
     });
+
+    // Seed database on startup
+    using (var scope = app.Services.CreateScope())
+    {
+        var initializer = scope.ServiceProvider.GetRequiredService<ApplicationDbContextInitializer>();
+        try
+        {
+            await initializer.SeedAsync();
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "An error occurred during database seeding. Ensure migrations are applied.");
+        }
+    }
 
     app.Run();
 }
