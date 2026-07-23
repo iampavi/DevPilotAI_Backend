@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace DevPilotAI.Infrastructure.Persistence;
 
-public class ApplicationDbContext : DbContext
+public class ApplicationDbContext : DbContext, IApplicationDbContext
 {
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly ICurrentUserService _currentUserService;

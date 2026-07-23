@@ -11,8 +11,12 @@ public class MappingProfile : Profile
     {
         // Entity to DTO (Read-only mappings - default MemberList.Destination)
         CreateMap<Workspace, WorkspaceDto>();
+        CreateMap<Workspace, WorkspaceBriefDto>();
         CreateMap<Project, ProjectDto>()
             .ForMember(dest => dest.ProjectType, opt => opt.MapFrom(src => src.ProjectType.ToString()));
+        CreateMap<Project, ProjectBriefDto>()
+            .ForMember(dest => dest.ProjectType, opt => opt.MapFrom(src => src.ProjectType.ToString()))
+            .ForMember(dest => dest.IndexStatus, opt => opt.MapFrom(src => src.Index.IndexStatus.ToString()));
         CreateMap<ProjectSettings, ProjectSettingsDto>();
         CreateMap<ProjectStatistics, ProjectStatisticsDto>();
         CreateMap<ProjectIndex, ProjectIndexDto>()
