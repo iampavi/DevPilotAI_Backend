@@ -1,5 +1,6 @@
 using DevPilotAI.Application.Common.Interfaces;
 using DevPilotAI.Domain.Entities;
+using DevPilotAI.Domain.Entities.Identity;
 using DevPilotAI.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Moq;
@@ -31,6 +32,18 @@ public class PersistenceTests : IDisposable
         // Ensure database is clean
         _context.Database.EnsureDeleted();
         _context.Database.EnsureCreated();
+
+        // Seed system user to satisfy foreign key constraints
+        var systemUser = new ApplicationUser
+        {
+            Id = Guid.Parse("D035B9FE-B7FE-438B-B0D1-1C349C3AF21F"),
+            UserName = "system@devpilot.ai",
+            Email = "system@devpilot.ai",
+            FirstName = "System",
+            LastName = "User"
+        };
+        _context.Users.Add(systemUser);
+        _context.SaveChanges();
     }
 
     [Fact]
@@ -40,7 +53,8 @@ public class PersistenceTests : IDisposable
         var workspace = new Workspace
         {
             Name = "Test Auditing Workspace",
-            Description = "Testing audit field generation"
+            Description = "Testing audit field generation",
+            UserId = Guid.Parse("D035B9FE-B7FE-438B-B0D1-1C349C3AF21F")
         };
 
         // Act
@@ -60,7 +74,8 @@ public class PersistenceTests : IDisposable
         // Arrange
         var workspace = new Workspace
         {
-            Name = "Workspace to Soft Delete"
+            Name = "Workspace to Soft Delete",
+            UserId = Guid.Parse("D035B9FE-B7FE-438B-B0D1-1C349C3AF21F")
         };
         _context.Workspaces.Add(workspace);
         await _context.SaveChangesAsync();
@@ -91,7 +106,8 @@ public class PersistenceTests : IDisposable
         // Arrange
         var workspace = new Workspace
         {
-            Name = "Workspace to Update"
+            Name = "Workspace to Update",
+            UserId = Guid.Parse("D035B9FE-B7FE-438B-B0D1-1C349C3AF21F")
         };
         _context.Workspaces.Add(workspace);
         await _context.SaveChangesAsync();

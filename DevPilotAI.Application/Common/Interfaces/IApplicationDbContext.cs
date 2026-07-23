@@ -10,6 +10,7 @@ public interface IApplicationDbContext
     DbSet<ProjectSettings> ProjectSettings { get; }
     DbSet<ProjectStatistics> ProjectStatistics { get; }
     DbSet<ProjectIndex> ProjectIndexes { get; }
+    DbSet<RefreshToken> RefreshTokens { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken);
     int SaveChanges();

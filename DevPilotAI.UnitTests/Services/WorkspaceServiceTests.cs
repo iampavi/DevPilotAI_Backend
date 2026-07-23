@@ -5,6 +5,7 @@ using DevPilotAI.Application.DTOs.Workspace;
 using DevPilotAI.Application.Services;
 using DevPilotAI.Shared.Common;
 using DevPilotAI.Domain.Entities;
+using DevPilotAI.Domain.Entities.Identity;
 using DevPilotAI.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -36,6 +37,18 @@ public class WorkspaceServiceTests : IDisposable
         _context.Database.EnsureDeleted();
         _context.Database.EnsureCreated();
 
+        // Seed system user to satisfy foreign key constraints
+        var systemUser = new ApplicationUser
+        {
+            Id = Guid.Parse("D035B9FE-B7FE-438B-B0D1-1C349C3AF21F"),
+            UserName = "system@devpilot.ai",
+            Email = "system@devpilot.ai",
+            FirstName = "System",
+            LastName = "User"
+        };
+        _context.Users.Add(systemUser);
+        _context.SaveChanges();
+
         var configuration = new MapperConfiguration(cfg =>
         {
             cfg.AddProfile<MappingProfile>();
@@ -43,7 +56,7 @@ public class WorkspaceServiceTests : IDisposable
         _mapper = configuration.CreateMapper();
 
         var logger = NullLogger<WorkspaceService>.Instance;
-        _service = new WorkspaceService(_context, _mapper, logger);
+        _service = new WorkspaceService(_context, _mapper, _currentUserServiceMock.Object, logger);
     }
 
     [Fact]
@@ -69,7 +82,11 @@ public class WorkspaceServiceTests : IDisposable
     public async Task CreateWorkspaceAsync_ShouldFail_WhenNameIsDuplicate()
     {
         // Arrange
-        var workspace = new Workspace { Name = "DuplicateName" };
+        var workspace = new Workspace
+        {
+            Name = "DuplicateName",
+            UserId = Guid.Parse("D035B9FE-B7FE-438B-B0D1-1C349C3AF21F")
+        };
         _context.Workspaces.Add(workspace);
         await _context.SaveChangesAsync();
 
@@ -87,7 +104,11 @@ public class WorkspaceServiceTests : IDisposable
     public async Task GetWorkspaceByIdAsync_ShouldReturnSuccess_WhenWorkspaceExists()
     {
         // Arrange
-        var workspace = new Workspace { Name = "Found Workspace" };
+        var workspace = new Workspace
+        {
+            Name = "Found Workspace",
+            UserId = Guid.Parse("D035B9FE-B7FE-438B-B0D1-1C349C3AF21F")
+        };
         _context.Workspaces.Add(workspace);
         await _context.SaveChangesAsync();
 
@@ -105,9 +126,9 @@ public class WorkspaceServiceTests : IDisposable
         // Arrange
         _context.Workspaces.AddRange(new[]
         {
-            new Workspace { Name = "Apple Workspace" },
-            new Workspace { Name = "Banana Workspace" },
-            new Workspace { Name = "Cherry Workspace" }
+            new Workspace { Name = "Apple Workspace", UserId = Guid.Parse("D035B9FE-B7FE-438B-B0D1-1C349C3AF21F") },
+            new Workspace { Name = "Banana Workspace", UserId = Guid.Parse("D035B9FE-B7FE-438B-B0D1-1C349C3AF21F") },
+            new Workspace { Name = "Cherry Workspace", UserId = Guid.Parse("D035B9FE-B7FE-438B-B0D1-1C349C3AF21F") }
         });
         await _context.SaveChangesAsync();
 
@@ -140,7 +161,11 @@ public class WorkspaceServiceTests : IDisposable
     public async Task UpdateWorkspaceAsync_ShouldUpdateDb_WhenRequestIsValid()
     {
         // Arrange
-        var workspace = new Workspace { Name = "Original Name" };
+        var workspace = new Workspace
+        {
+            Name = "Original Name",
+            UserId = Guid.Parse("D035B9FE-B7FE-438B-B0D1-1C349C3AF21F")
+        };
         _context.Workspaces.Add(workspace);
         await _context.SaveChangesAsync();
 
@@ -165,6 +190,7 @@ public class WorkspaceServiceTests : IDisposable
         var workspace = new Workspace
         {
             Name = "Workspace to Delete",
+            UserId = Guid.Parse("D035B9FE-B7FE-438B-B0D1-1C349C3AF21F"),
             Projects = new List<Project>
             {
                 new Project { Name = "Child Project 1" },

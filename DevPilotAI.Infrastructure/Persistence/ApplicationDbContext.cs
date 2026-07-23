@@ -3,10 +3,12 @@ using DevPilotAI.Application.Common.Interfaces;
 using DevPilotAI.Domain.Common;
 using DevPilotAI.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
+using DevPilotAI.Domain.Entities.Identity;
 
 namespace DevPilotAI.Infrastructure.Persistence;
 
-public class ApplicationDbContext : DbContext, IApplicationDbContext
+public class ApplicationDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, Guid>, IApplicationDbContext
 {
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly ICurrentUserService _currentUserService;
@@ -25,6 +27,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<ProjectSettings> ProjectSettings => Set<ProjectSettings>();
     public DbSet<ProjectStatistics> ProjectStatistics => Set<ProjectStatistics>();
     public DbSet<ProjectIndex> ProjectIndexes => Set<ProjectIndex>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

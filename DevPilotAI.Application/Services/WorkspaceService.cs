@@ -13,15 +13,18 @@ public class WorkspaceService : IWorkspaceService
 {
     private readonly IApplicationDbContext _context;
     private readonly IMapper _mapper;
+    private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<WorkspaceService> _logger;
 
     public WorkspaceService(
         IApplicationDbContext context,
         IMapper mapper,
+        ICurrentUserService currentUserService,
         ILogger<WorkspaceService> logger)
     {
         _context = context;
         _mapper = mapper;
+        _currentUserService = currentUserService;
         _logger = logger;
     }
 
@@ -29,16 +32,21 @@ public class WorkspaceService : IWorkspaceService
     {
         _logger.LogInformation("Attempting to create workspace with name: {Name}", dto.Name);
 
+        // Resolve current user ID
+        var systemUserId = Guid.Parse("D035B9FE-B7FE-438B-B0D1-1C349C3AF21F");
+        var userId = Guid.TryParse(_currentUserService.UserId, out var parsedId) ? parsedId : systemUserId;
+
         var isDuplicate = await _context.Workspaces
-            .AnyAsync(w => w.Name == dto.Name, cancellationToken);
+            .AnyAsync(w => w.UserId == userId && w.Name == dto.Name, cancellationToken);
 
         if (isDuplicate)
         {
-            _logger.LogWarning("Failed to create workspace. Name {Name} is already taken.", dto.Name);
-            return Result.Failure<WorkspaceDto>(new Error("Workspace.DuplicateName", "Workspace name is already in use."));
+            _logger.LogWarning("Failed to create workspace. Name {Name} is already taken for user {UserId}.", dto.Name, userId);
+            return Result.Failure<WorkspaceDto>(new Error("Workspace.DuplicateName", "Workspace name is already in use by this user."));
         }
 
         var workspace = _mapper.Map<Workspace>(dto);
+        workspace.UserId = userId;
 
         // Add domain event (prepared for downstream execution)
         workspace.DomainEvents.Add(new WorkspaceCreatedEvent(workspace));
@@ -46,7 +54,7 @@ public class WorkspaceService : IWorkspaceService
         _context.Workspaces.Add(workspace);
         await _context.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Workspace created successfully with ID: {WorkspaceId}", workspace.Id);
+        _logger.LogInformation("Workspace created successfully with ID: {WorkspaceId} for user {UserId}", workspace.Id, userId);
         
         var workspaceDto = _mapper.Map<WorkspaceDto>(workspace);
         return Result.Success(workspaceDto);
@@ -120,12 +128,12 @@ public class WorkspaceService : IWorkspaceService
         }
 
         var isDuplicate = await _context.Workspaces
-            .AnyAsync(w => w.Name == dto.Name && w.Id != id, cancellationToken);
+            .AnyAsync(w => w.UserId == workspace.UserId && w.Name == dto.Name && w.Id != id, cancellationToken);
 
         if (isDuplicate)
         {
-            _logger.LogWarning("Failed to update workspace {WorkspaceId}. Name {Name} is already taken.", id, dto.Name);
-            return Result.Failure<WorkspaceDto>(new Error("Workspace.DuplicateName", "Workspace name is already in use by another workspace."));
+            _logger.LogWarning("Failed to update workspace {WorkspaceId}. Name {Name} is already taken by another workspace for this user.", id, dto.Name);
+            return Result.Failure<WorkspaceDto>(new Error("Workspace.DuplicateName", "Workspace name is already in use by another workspace for this user."));
         }
 
         // Apply changes

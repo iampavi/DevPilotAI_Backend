@@ -21,10 +21,17 @@ public class WorkspaceConfiguration : IEntityTypeConfiguration<Workspace>
 
         // Configure indexes
         builder.HasIndex(w => w.Name);
+        builder.HasIndex(w => w.UserId);
         builder.HasIndex(w => w.CreatedAt);
         builder.HasIndex(w => w.LastModifiedAt);
 
-        // One-to-Many Relationship
+        // One-to-Many Relationship with User
+        builder.HasOne(w => w.User)
+            .WithMany(u => u.Workspaces)
+            .HasForeignKey(w => w.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // One-to-Many Relationship with Projects
         builder.HasMany(w => w.Projects)
             .WithOne(p => p.Workspace)
             .HasForeignKey(p => p.WorkspaceId)

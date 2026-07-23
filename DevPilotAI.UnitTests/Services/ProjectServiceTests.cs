@@ -4,6 +4,7 @@ using DevPilotAI.Application.Common.Mappings;
 using DevPilotAI.Application.DTOs.Project;
 using DevPilotAI.Application.Services;
 using DevPilotAI.Domain.Entities;
+using DevPilotAI.Domain.Entities.Identity;
 using DevPilotAI.Domain.Enums;
 using DevPilotAI.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -37,6 +38,18 @@ public class ProjectServiceTests : IDisposable
         _context.Database.EnsureDeleted();
         _context.Database.EnsureCreated();
 
+        // Seed system user to satisfy foreign key constraints
+        var systemUser = new ApplicationUser
+        {
+            Id = Guid.Parse("D035B9FE-B7FE-438B-B0D1-1C349C3AF21F"),
+            UserName = "system@devpilot.ai",
+            Email = "system@devpilot.ai",
+            FirstName = "System",
+            LastName = "User"
+        };
+        _context.Users.Add(systemUser);
+        _context.SaveChanges();
+
         var configuration = new MapperConfiguration(cfg =>
         {
             cfg.AddProfile<MappingProfile>();
@@ -51,7 +64,11 @@ public class ProjectServiceTests : IDisposable
     public async Task CreateProjectAsync_ShouldInstantiateDefaults_WhenRequestIsValid()
     {
         // Arrange
-        var workspace = new Workspace { Name = "Workspace to Add Project" };
+        var workspace = new Workspace
+        {
+            Name = "Workspace to Add Project",
+            UserId = Guid.Parse("D035B9FE-B7FE-438B-B0D1-1C349C3AF21F")
+        };
         _context.Workspaces.Add(workspace);
         await _context.SaveChangesAsync();
 
@@ -114,7 +131,11 @@ public class ProjectServiceTests : IDisposable
     public async Task CreateProjectAsync_ShouldFail_WhenNameIsDuplicateInWorkspace()
     {
         // Arrange
-        var workspace = new Workspace { Name = "Workspace" };
+        var workspace = new Workspace
+        {
+            Name = "Workspace",
+            UserId = Guid.Parse("D035B9FE-B7FE-438B-B0D1-1C349C3AF21F")
+        };
         _context.Workspaces.Add(workspace);
         await _context.SaveChangesAsync();
 
@@ -136,7 +157,11 @@ public class ProjectServiceTests : IDisposable
     public async Task UpdateProjectAsync_ShouldFail_WhenConcurrencyExceptionOccurs()
     {
         // Arrange
-        var workspace = new Workspace { Name = "Workspace" };
+        var workspace = new Workspace
+        {
+            Name = "Workspace",
+            UserId = Guid.Parse("D035B9FE-B7FE-438B-B0D1-1C349C3AF21F")
+        };
         _context.Workspaces.Add(workspace);
         await _context.SaveChangesAsync();
 
@@ -167,7 +192,11 @@ public class ProjectServiceTests : IDisposable
     public async Task UpdateProjectSettingsAsync_ShouldUpdateSettingsCorrectly()
     {
         // Arrange
-        var workspace = new Workspace { Name = "Workspace" };
+        var workspace = new Workspace
+        {
+            Name = "Workspace",
+            UserId = Guid.Parse("D035B9FE-B7FE-438B-B0D1-1C349C3AF21F")
+        };
         _context.Workspaces.Add(workspace);
         await _context.SaveChangesAsync();
 
@@ -207,7 +236,11 @@ public class ProjectServiceTests : IDisposable
     public async Task DeleteProjectAsync_ShouldSoftDeleteCascade()
     {
         // Arrange
-        var workspace = new Workspace { Name = "Workspace" };
+        var workspace = new Workspace
+        {
+            Name = "Workspace",
+            UserId = Guid.Parse("D035B9FE-B7FE-438B-B0D1-1C349C3AF21F")
+        };
         _context.Workspaces.Add(workspace);
         await _context.SaveChangesAsync();
 

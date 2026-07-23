@@ -1,7 +1,9 @@
 using AutoMapper;
+using DevPilotAI.Application.DTOs.Identity;
 using DevPilotAI.Application.DTOs.Project;
 using DevPilotAI.Application.DTOs.Workspace;
 using DevPilotAI.Domain.Entities;
+using DevPilotAI.Domain.Entities.Identity;
 
 namespace DevPilotAI.Application.Common.Mappings;
 
@@ -21,6 +23,7 @@ public class MappingProfile : Profile
         CreateMap<ProjectStatistics, ProjectStatisticsDto>();
         CreateMap<ProjectIndex, ProjectIndexDto>()
             .ForMember(dest => dest.IndexStatus, opt => opt.MapFrom(src => src.IndexStatus.ToString()));
+        CreateMap<ApplicationUser, UserDto>();
 
         // DTO to Entity (Write/Create/Update mappings - validated using MemberList.Source)
         CreateMap<CreateWorkspaceDto, Workspace>(MemberList.Source);

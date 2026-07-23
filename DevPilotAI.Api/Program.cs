@@ -53,6 +53,7 @@ try
 
     app.UseCors("DefaultPolicy");
 
+    app.UseAuthentication();
     app.UseAuthorization();
 
     app.MapControllers();
