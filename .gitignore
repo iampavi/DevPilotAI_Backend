@@ -1,0 +1,67 @@
+## Ignore Visual Studio & .NET Core build outputs and configurations
+[Ob]bin/
+[Ob]obj/
+[Ob]appsettings.Development.json
+# Note: Keep appsettings.Development.json in repository template for developers, 
+# but ignore local database files, user secrets, logs, and OS-specific files.
+
+# User-specific files
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Mono Class Library
+*.sublime-project
+*.sublime-workspace
+
+# Build Results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+x64/
+x86/
+[Aa]rm/
+[Aa]rm64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio 2015/2017/2019/2022 cache directory
+.vs/
+# Visual Studio 2022 new solution format caches
+.slnx/
+
+# Rider
+.idea/
+*.sln.iml
+
+# VS Code
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# Local database files
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Log files
+*.log
+logs/
+Logs/
+
+# Docker
+.dockerignore
+
+# OS metadata
+.DS_Store
+Thumbs.db

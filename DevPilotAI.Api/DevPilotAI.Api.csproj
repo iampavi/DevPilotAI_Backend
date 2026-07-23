@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DevPilotAI.Application\DevPilotAI.Application.csproj" />
+    <ProjectReference Include="..\DevPilotAI.Infrastructure\DevPilotAI.Infrastructure.csproj" />
+    <ProjectReference Include="..\DevPilotAI.Shared\DevPilotAI.Shared.csproj" />
+  </ItemGroup>
+
+</Project>

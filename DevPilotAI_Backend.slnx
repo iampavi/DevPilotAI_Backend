@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="DevPilotAI.Shared/DevPilotAI.Shared.csproj" />
+  <Project Path="DevPilotAI.Domain/DevPilotAI.Domain.csproj" />
+  <Project Path="DevPilotAI.Application/DevPilotAI.Application.csproj" />
+  <Project Path="DevPilotAI.Infrastructure/DevPilotAI.Infrastructure.csproj" />
+  <Project Path="DevPilotAI.Api/DevPilotAI.Api.csproj" />
+  <Project Path="DevPilotAI.UnitTests/DevPilotAI.UnitTests.csproj" />
+</Solution>
