@@ -18,6 +18,7 @@ public class ProjectService : IProjectService
     private readonly IFileStorageService _storageService;
     private readonly IProjectImportQueue _importQueue;
     private readonly IProjectParseQueue _parseQueue;
+    private readonly IProjectChunkingQueue _chunkingQueue;
     private readonly ILogger<ProjectService> _logger;
 
     public ProjectService(
@@ -26,6 +27,7 @@ public class ProjectService : IProjectService
         IFileStorageService storageService,
         IProjectImportQueue importQueue,
         IProjectParseQueue parseQueue,
+        IProjectChunkingQueue chunkingQueue,
         ILogger<ProjectService> logger)
     {
         _context = context;
@@ -33,6 +35,7 @@ public class ProjectService : IProjectService
         _storageService = storageService;
         _importQueue = importQueue;
         _parseQueue = parseQueue;
+        _chunkingQueue = chunkingQueue;
         _logger = logger;
     }
 
@@ -571,5 +574,96 @@ public class ProjectService : IProjectService
         }
 
         return Result.Success(_mapper.Map<ProjectParseJobDto>(job));
+    }
+
+    public async Task<Result<ProjectChunkingJobDto>> ChunkProjectAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Queueing chunking request for project {ProjectId}", projectId);
+
+        var project = await _context.Projects
+            .FirstOrDefaultAsync(p => p.Id == projectId, cancellationToken);
+
+        if (project == null)
+        {
+            return Result.Failure<ProjectChunkingJobDto>(new Error("Project.NotFound", "Project not found."));
+        }
+
+        var jobId = Guid.NewGuid();
+        var job = new ProjectChunkingJob
+        {
+            Id = jobId,
+            ProjectId = projectId,
+            Status = JobStatus.Pending,
+            Progress = 0,
+            StartedAt = DateTime.UtcNow
+        };
+
+        _context.ProjectChunkingJobs.Add(job);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        // Queue background job
+        var chunkingItem = new ChunkingJobItem(jobId, projectId);
+        await _chunkingQueue.QueueChunkingJobAsync(chunkingItem);
+
+        return Result.Success(_mapper.Map<ProjectChunkingJobDto>(job));
+    }
+
+    public async Task<Result<IReadOnlyList<ProjectChunkingJobDto>>> GetProjectChunkingJobsAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        var projectExists = await _context.Projects.AnyAsync(p => p.Id == projectId, cancellationToken);
+        if (!projectExists)
+        {
+            return Result.Failure<IReadOnlyList<ProjectChunkingJobDto>>(new Error("Project.NotFound", "Project not found."));
+        }
+
+        var jobs = await _context.ProjectChunkingJobs
+            .Where(j => j.ProjectId == projectId)
+            .OrderByDescending(j => j.StartedAt)
+            .ToListAsync(cancellationToken);
+
+        var dtos = _mapper.Map<List<ProjectChunkingJobDto>>(jobs);
+        return Result.Success<IReadOnlyList<ProjectChunkingJobDto>>(dtos);
+    }
+
+    public async Task<Result<ProjectChunkingJobDto>> GetProjectChunkingJobByIdAsync(Guid jobId, CancellationToken cancellationToken = default)
+    {
+        var job = await _context.ProjectChunkingJobs
+            .FirstOrDefaultAsync(j => j.Id == jobId, cancellationToken);
+
+        if (job == null)
+        {
+            return Result.Failure<ProjectChunkingJobDto>(new Error("ChunkingJob.NotFound", "Project chunking job not found."));
+        }
+
+        return Result.Success(_mapper.Map<ProjectChunkingJobDto>(job));
+    }
+
+    public async Task<Result<PagedResult<CodeChunkDto>>> GetProjectChunksAsync(Guid projectId, int pageNumber, int pageSize, string? chunkType = null, CancellationToken cancellationToken = default)
+    {
+        var projectExists = await _context.Projects.AnyAsync(p => p.Id == projectId, cancellationToken);
+        if (!projectExists)
+        {
+            return Result.Failure<PagedResult<CodeChunkDto>>(new Error("Project.NotFound", "Project not found."));
+        }
+
+        var query = _context.CodeChunks.Where(c => c.ProjectId == projectId);
+
+        if (!string.IsNullOrEmpty(chunkType))
+        {
+            query = query.Where(c => c.ChunkType == chunkType);
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        var items = await query
+            .OrderBy(c => c.Id)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        var dtos = _mapper.Map<List<CodeChunkDto>>(items);
+        var pagedResult = new PagedResult<CodeChunkDto>(dtos, totalCount, pageNumber, pageSize);
+
+        return Result.Success(pagedResult);
     }
 }

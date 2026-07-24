@@ -24,4 +24,9 @@ public interface IProjectService
     Task<Result<ProjectParseJobDto>> ParseProjectAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<Result<IReadOnlyList<ProjectParseJobDto>>> GetProjectParseJobsAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<Result<ProjectParseJobDto>> GetProjectParseJobByIdAsync(Guid jobId, CancellationToken cancellationToken = default);
+
+    Task<Result<ProjectChunkingJobDto>> ChunkProjectAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task<Result<IReadOnlyList<ProjectChunkingJobDto>>> GetProjectChunkingJobsAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task<Result<ProjectChunkingJobDto>> GetProjectChunkingJobByIdAsync(Guid jobId, CancellationToken cancellationToken = default);
+    Task<Result<PagedResult<CodeChunkDto>>> GetProjectChunksAsync(Guid projectId, int pageNumber, int pageSize, string? chunkType = null, CancellationToken cancellationToken = default);
 }

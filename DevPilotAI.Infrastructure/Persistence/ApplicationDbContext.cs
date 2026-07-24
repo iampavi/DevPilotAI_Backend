@@ -35,6 +35,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<ParsedProperty> ParsedProperties => Set<ParsedProperty>();
     public DbSet<ParsedField> ParsedFields => Set<ParsedField>();
     public DbSet<ProjectParseJob> ProjectParseJobs => Set<ProjectParseJob>();
+    public DbSet<CodeChunk> CodeChunks => Set<CodeChunk>();
+    public DbSet<ProjectChunkingJob> ProjectChunkingJobs => Set<ProjectChunkingJob>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

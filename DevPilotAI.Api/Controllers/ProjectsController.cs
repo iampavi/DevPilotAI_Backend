@@ -324,4 +324,83 @@ public class ProjectsController : ApiControllerBase
 
         return Ok(ApiResponse<ProjectParseJobDto>.Success(result.Value));
     }
+
+    [HttpPost("/api/projects/{projectId:guid}/chunk")]
+    public async Task<ActionResult<ApiResponse<ProjectChunkingJobDto>>> ChunkProject(
+        Guid projectId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _projectService.ChunkProjectAsync(projectId, cancellationToken);
+
+        if (result.IsFailure)
+        {
+            if (result.Error.Code == "Project.NotFound")
+            {
+                return NotFound(ApiResponse<ProjectChunkingJobDto>.Failure(result.Error.Message, result.Error.Code));
+            }
+            return BadRequest(ApiResponse<ProjectChunkingJobDto>.Failure(result.Error.Message, result.Error.Code));
+        }
+
+        return Accepted(ApiResponse<ProjectChunkingJobDto>.Success(result.Value, "Project chunking and embedding queued."));
+    }
+
+    [HttpGet("/api/projects/{projectId:guid}/chunk-jobs")]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<ProjectChunkingJobDto>>>> GetProjectChunkingJobs(
+        Guid projectId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _projectService.GetProjectChunkingJobsAsync(projectId, cancellationToken);
+
+        if (result.IsFailure)
+        {
+            if (result.Error.Code == "Project.NotFound")
+            {
+                return NotFound(ApiResponse<IReadOnlyList<ProjectChunkingJobDto>>.Failure(result.Error.Message, result.Error.Code));
+            }
+            return BadRequest(ApiResponse<IReadOnlyList<ProjectChunkingJobDto>>.Failure(result.Error.Message, result.Error.Code));
+        }
+
+        return Ok(ApiResponse<IReadOnlyList<ProjectChunkingJobDto>>.Success(result.Value));
+    }
+
+    [HttpGet("/api/projects/chunk-jobs/{jobId:guid}")]
+    public async Task<ActionResult<ApiResponse<ProjectChunkingJobDto>>> GetProjectChunkingJob(
+        Guid jobId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _projectService.GetProjectChunkingJobByIdAsync(jobId, cancellationToken);
+
+        if (result.IsFailure)
+        {
+            if (result.Error.Code == "ChunkingJob.NotFound")
+            {
+                return NotFound(ApiResponse<ProjectChunkingJobDto>.Failure(result.Error.Message, result.Error.Code));
+            }
+            return BadRequest(ApiResponse<ProjectChunkingJobDto>.Failure(result.Error.Message, result.Error.Code));
+        }
+
+        return Ok(ApiResponse<ProjectChunkingJobDto>.Success(result.Value));
+    }
+
+    [HttpGet("/api/projects/{projectId:guid}/chunks")]
+    public async Task<ActionResult<ApiResponse<PagedResult<CodeChunkDto>>>> GetProjectChunks(
+        Guid projectId,
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 10,
+        [FromQuery] string? chunkType = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _projectService.GetProjectChunksAsync(projectId, pageNumber, pageSize, chunkType, cancellationToken);
+
+        if (result.IsFailure)
+        {
+            if (result.Error.Code == "Project.NotFound")
+            {
+                return NotFound(ApiResponse<PagedResult<CodeChunkDto>>.Failure(result.Error.Message, result.Error.Code));
+            }
+            return BadRequest(ApiResponse<PagedResult<CodeChunkDto>>.Failure(result.Error.Message, result.Error.Code));
+        }
+
+        return Ok(ApiResponse<PagedResult<CodeChunkDto>>.Success(result.Value));
+    }
 }

@@ -37,6 +37,10 @@ public class MappingProfile : Profile
         CreateMap<ParsedProperty, ParsedPropertyDto>();
         CreateMap<ParsedField, ParsedFieldDto>();
 
+        CreateMap<CodeChunk, CodeChunkDto>();
+        CreateMap<ProjectChunkingJob, ProjectChunkingJobDto>()
+            .ForMember(dest => dest.Status, opt => opt.MapFrom(src => src.Status.ToString()));
+
         // DTO to Entity (Write/Create/Update mappings - validated using MemberList.Source)
         CreateMap<CreateWorkspaceDto, Workspace>(MemberList.Source);
         CreateMap<UpdateWorkspaceDto, Workspace>(MemberList.Source);

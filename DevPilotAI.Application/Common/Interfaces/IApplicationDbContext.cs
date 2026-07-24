@@ -18,6 +18,8 @@ public interface IApplicationDbContext
     DbSet<ParsedProperty> ParsedProperties { get; }
     DbSet<ParsedField> ParsedFields { get; }
     DbSet<ProjectParseJob> ProjectParseJobs { get; }
+    DbSet<CodeChunk> CodeChunks { get; }
+    DbSet<ProjectChunkingJob> ProjectChunkingJobs { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken);
     int SaveChanges();

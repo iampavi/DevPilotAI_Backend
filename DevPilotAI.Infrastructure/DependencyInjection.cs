@@ -1,5 +1,6 @@
 using DevPilotAI.Application.Common.Interfaces;
 using DevPilotAI.Infrastructure.Services;
+using DevPilotAI.Infrastructure.Services.EmbeddingProviders;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -89,9 +90,22 @@ public static class DependencyInjection
 
         // Parsing & Chunking Hook services
         services.AddSingleton<ICSharpParser, RoslynCSharpParser>();
-        services.AddScoped<IChunkingScheduler, NoOpChunkingScheduler>();
+        services.AddScoped<IChunkingScheduler, ChunkingScheduler>();
         services.AddSingleton<IProjectParseQueue, ProjectParseQueue>();
         services.AddHostedService<ProjectParseBackgroundWorker>();
+
+        // Embedding Providers (Isolated via Typed HttpClients)
+        services.AddHttpClient<IEmbeddingProvider, OpenAIEmbeddingProvider>();
+        services.AddHttpClient<IEmbeddingProvider, AzureOpenAIEmbeddingProvider>();
+        services.AddHttpClient<IEmbeddingProvider, OllamaEmbeddingProvider>();
+        services.AddScoped<IEmbeddingProvider, MockEmbeddingProvider>();
+
+        // Embedding, Qdrant, Semantic Search services and Background Worker
+        services.AddScoped<IEmbeddingService, EmbeddingService>();
+        services.AddSingleton<IQdrantService, QdrantService>();
+        services.AddScoped<ISemanticSearchService, SemanticSearchService>();
+        services.AddSingleton<IProjectChunkingQueue, ProjectChunkingQueue>();
+        services.AddHostedService<ProjectChunkingBackgroundWorker>();
 
         return services;
     }
