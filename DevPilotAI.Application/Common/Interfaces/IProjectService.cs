@@ -20,4 +20,8 @@ public interface IProjectService
     Task<Result<ProjectImportJobDto>> ImportGitProjectAsync(Guid workspaceId, ImportGitDto dto, CancellationToken cancellationToken = default);
     Task<Result<IReadOnlyList<ProjectImportJobDto>>> GetProjectImportJobsAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<Result<ProjectImportJobDto>> GetProjectImportJobByIdAsync(Guid jobId, CancellationToken cancellationToken = default);
+
+    Task<Result<ProjectParseJobDto>> ParseProjectAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task<Result<IReadOnlyList<ProjectParseJobDto>>> GetProjectParseJobsAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task<Result<ProjectParseJobDto>> GetProjectParseJobByIdAsync(Guid jobId, CancellationToken cancellationToken = default);
 }

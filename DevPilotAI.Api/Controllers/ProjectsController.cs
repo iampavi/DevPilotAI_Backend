@@ -267,4 +267,61 @@ public class ProjectsController : ApiControllerBase
 
         return Ok(ApiResponse<ProjectImportJobDto>.Success(result.Value));
     }
+
+    [HttpPost("/api/projects/{projectId:guid}/parse")]
+    public async Task<ActionResult<ApiResponse<ProjectParseJobDto>>> ParseProject(
+        Guid projectId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _projectService.ParseProjectAsync(projectId, cancellationToken);
+
+        if (result.IsFailure)
+        {
+            if (result.Error.Code == "Project.NotFound")
+            {
+                return NotFound(ApiResponse<ProjectParseJobDto>.Failure(result.Error.Message, result.Error.Code));
+            }
+            return BadRequest(ApiResponse<ProjectParseJobDto>.Failure(result.Error.Message, result.Error.Code));
+        }
+
+        return Accepted(ApiResponse<ProjectParseJobDto>.Success(result.Value, "Project parsing queued. Check status for progress."));
+    }
+
+    [HttpGet("/api/projects/{projectId:guid}/parse-jobs")]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<ProjectParseJobDto>>>> GetProjectParseJobs(
+        Guid projectId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _projectService.GetProjectParseJobsAsync(projectId, cancellationToken);
+
+        if (result.IsFailure)
+        {
+            if (result.Error.Code == "Project.NotFound")
+            {
+                return NotFound(ApiResponse<IReadOnlyList<ProjectParseJobDto>>.Failure(result.Error.Message, result.Error.Code));
+            }
+            return BadRequest(ApiResponse<IReadOnlyList<ProjectParseJobDto>>.Failure(result.Error.Message, result.Error.Code));
+        }
+
+        return Ok(ApiResponse<IReadOnlyList<ProjectParseJobDto>>.Success(result.Value));
+    }
+
+    [HttpGet("/api/projects/parse-jobs/{jobId:guid}")]
+    public async Task<ActionResult<ApiResponse<ProjectParseJobDto>>> GetProjectParseJob(
+        Guid jobId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _projectService.GetProjectParseJobByIdAsync(jobId, cancellationToken);
+
+        if (result.IsFailure)
+        {
+            if (result.Error.Code == "ParseJob.NotFound")
+            {
+                return NotFound(ApiResponse<ProjectParseJobDto>.Failure(result.Error.Message, result.Error.Code));
+            }
+            return BadRequest(ApiResponse<ProjectParseJobDto>.Failure(result.Error.Message, result.Error.Code));
+        }
+
+        return Ok(ApiResponse<ProjectParseJobDto>.Success(result.Value));
+    }
 }

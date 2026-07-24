@@ -27,6 +27,7 @@ public class ProjectImportTests : IDisposable
     private readonly Mock<ICurrentUserService> _currentUserServiceMock;
     private readonly Mock<IFileStorageService> _fileStorageServiceMock;
     private readonly Mock<IProjectImportQueue> _projectImportQueueMock;
+    private readonly Mock<IProjectParseQueue> _projectParseQueueMock;
     private readonly Guid _workspaceId = Guid.Parse("D035B9FE-B7FE-438B-B0D1-1C349C3AF21E");
     private readonly Guid _systemUserId = Guid.Parse("D035B9FE-B7FE-438B-B0D1-1C349C3AF21F");
 
@@ -68,6 +69,7 @@ public class ProjectImportTests : IDisposable
 
         _fileStorageServiceMock = new Mock<IFileStorageService>();
         _projectImportQueueMock = new Mock<IProjectImportQueue>();
+        _projectParseQueueMock = new Mock<IProjectParseQueue>();
 
         var configuration = new MapperConfiguration(cfg =>
         {
@@ -80,6 +82,7 @@ public class ProjectImportTests : IDisposable
             _mapper,
             _fileStorageServiceMock.Object,
             _projectImportQueueMock.Object,
+            _projectParseQueueMock.Object,
             NullLogger<ProjectService>.Instance);
     }
 

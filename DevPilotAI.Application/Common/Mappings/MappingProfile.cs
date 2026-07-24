@@ -28,6 +28,15 @@ public class MappingProfile : Profile
             .ForMember(dest => dest.ImportType, opt => opt.MapFrom(src => src.ImportType.ToString()))
             .ForMember(dest => dest.Status, opt => opt.MapFrom(src => src.Status.ToString()));
 
+        CreateMap<ProjectParseJob, ProjectParseJobDto>()
+            .ForMember(dest => dest.Status, opt => opt.MapFrom(src => src.Status.ToString()));
+        CreateMap<ParsedFile, ParsedFileDto>();
+        CreateMap<ParsedClass, ParsedClassDto>()
+            .ForMember(dest => dest.SymbolType, opt => opt.MapFrom(src => src.SymbolType.ToString()));
+        CreateMap<ParsedMethod, ParsedMethodDto>();
+        CreateMap<ParsedProperty, ParsedPropertyDto>();
+        CreateMap<ParsedField, ParsedFieldDto>();
+
         // DTO to Entity (Write/Create/Update mappings - validated using MemberList.Source)
         CreateMap<CreateWorkspaceDto, Workspace>(MemberList.Source);
         CreateMap<UpdateWorkspaceDto, Workspace>(MemberList.Source);

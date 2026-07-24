@@ -87,6 +87,12 @@ public static class DependencyInjection
         services.AddSingleton<IProjectImportQueue, ProjectImportQueue>();
         services.AddHostedService<ProjectImportBackgroundWorker>();
 
+        // Parsing & Chunking Hook services
+        services.AddSingleton<ICSharpParser, RoslynCSharpParser>();
+        services.AddScoped<IChunkingScheduler, NoOpChunkingScheduler>();
+        services.AddSingleton<IProjectParseQueue, ProjectParseQueue>();
+        services.AddHostedService<ProjectParseBackgroundWorker>();
+
         return services;
     }
 }

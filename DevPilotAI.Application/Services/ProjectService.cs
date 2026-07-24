@@ -17,6 +17,7 @@ public class ProjectService : IProjectService
     private readonly IMapper _mapper;
     private readonly IFileStorageService _storageService;
     private readonly IProjectImportQueue _importQueue;
+    private readonly IProjectParseQueue _parseQueue;
     private readonly ILogger<ProjectService> _logger;
 
     public ProjectService(
@@ -24,12 +25,14 @@ public class ProjectService : IProjectService
         IMapper mapper,
         IFileStorageService storageService,
         IProjectImportQueue importQueue,
+        IProjectParseQueue parseQueue,
         ILogger<ProjectService> logger)
     {
         _context = context;
         _mapper = mapper;
         _storageService = storageService;
         _importQueue = importQueue;
+        _parseQueue = parseQueue;
         _logger = logger;
     }
 
@@ -501,5 +504,72 @@ public class ProjectService : IProjectService
         }
 
         return Result.Success(_mapper.Map<ProjectImportJobDto>(job));
+    }
+
+    public async Task<Result<ProjectParseJobDto>> ParseProjectAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Queueing parse request for project {ProjectId}", projectId);
+
+        var project = await _context.Projects
+            .FirstOrDefaultAsync(p => p.Id == projectId, cancellationToken);
+
+        if (project == null)
+        {
+            return Result.Failure<ProjectParseJobDto>(new Error("Project.NotFound", "Project not found."));
+        }
+
+        if (string.IsNullOrEmpty(project.SourceLocation))
+        {
+            return Result.Failure<ProjectParseJobDto>(new Error("Project.NotImported", "Project source files have not been imported yet."));
+        }
+
+        var jobId = Guid.NewGuid();
+        var job = new ProjectParseJob
+        {
+            Id = jobId,
+            ProjectId = projectId,
+            Status = JobStatus.Pending,
+            Progress = 0,
+            StartedAt = DateTime.UtcNow
+        };
+
+        _context.ProjectParseJobs.Add(job);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        // Queue background job
+        var parseItem = new ParseJobItem(jobId, projectId, project.SourceLocation);
+        await _parseQueue.QueueParseJobAsync(parseItem);
+
+        return Result.Success(_mapper.Map<ProjectParseJobDto>(job));
+    }
+
+    public async Task<Result<IReadOnlyList<ProjectParseJobDto>>> GetProjectParseJobsAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        var projectExists = await _context.Projects.AnyAsync(p => p.Id == projectId, cancellationToken);
+        if (!projectExists)
+        {
+            return Result.Failure<IReadOnlyList<ProjectParseJobDto>>(new Error("Project.NotFound", "Project not found."));
+        }
+
+        var jobs = await _context.ProjectParseJobs
+            .Where(j => j.ProjectId == projectId)
+            .OrderByDescending(j => j.StartedAt)
+            .ToListAsync(cancellationToken);
+
+        var dtos = _mapper.Map<List<ProjectParseJobDto>>(jobs);
+        return Result.Success<IReadOnlyList<ProjectParseJobDto>>(dtos);
+    }
+
+    public async Task<Result<ProjectParseJobDto>> GetProjectParseJobByIdAsync(Guid jobId, CancellationToken cancellationToken = default)
+    {
+        var job = await _context.ProjectParseJobs
+            .FirstOrDefaultAsync(j => j.Id == jobId, cancellationToken);
+
+        if (job == null)
+        {
+            return Result.Failure<ProjectParseJobDto>(new Error("ParseJob.NotFound", "Project parse job not found."));
+        }
+
+        return Result.Success(_mapper.Map<ProjectParseJobDto>(job));
     }
 }

@@ -22,6 +22,7 @@ public class ProjectServiceTests : IDisposable
     private readonly Mock<ICurrentUserService> _currentUserServiceMock;
     private readonly Mock<IFileStorageService> _fileStorageServiceMock;
     private readonly Mock<IProjectImportQueue> _projectImportQueueMock;
+    private readonly Mock<IProjectParseQueue> _projectParseQueueMock;
     private readonly DbContextOptions<ApplicationDbContext> _dbOptions;
 
     public ProjectServiceTests()
@@ -54,6 +55,7 @@ public class ProjectServiceTests : IDisposable
 
         _fileStorageServiceMock = new Mock<IFileStorageService>();
         _projectImportQueueMock = new Mock<IProjectImportQueue>();
+        _projectParseQueueMock = new Mock<IProjectParseQueue>();
 
         var configuration = new MapperConfiguration(cfg =>
         {
@@ -62,7 +64,7 @@ public class ProjectServiceTests : IDisposable
         _mapper = configuration.CreateMapper();
 
         var logger = NullLogger<ProjectService>.Instance;
-        _service = new ProjectService(_context, _mapper, _fileStorageServiceMock.Object, _projectImportQueueMock.Object, logger);
+        _service = new ProjectService(_context, _mapper, _fileStorageServiceMock.Object, _projectImportQueueMock.Object, _projectParseQueueMock.Object, logger);
     }
 
     [Fact]

@@ -29,6 +29,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<ProjectIndex> ProjectIndexes => Set<ProjectIndex>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<ProjectImportJob> ProjectImportJobs => Set<ProjectImportJob>();
+    public DbSet<ParsedFile> ParsedFiles => Set<ParsedFile>();
+    public DbSet<ParsedClass> ParsedClasses => Set<ParsedClass>();
+    public DbSet<ParsedMethod> ParsedMethods => Set<ParsedMethod>();
+    public DbSet<ParsedProperty> ParsedProperties => Set<ParsedProperty>();
+    public DbSet<ParsedField> ParsedFields => Set<ParsedField>();
+    public DbSet<ProjectParseJob> ProjectParseJobs => Set<ProjectParseJob>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
