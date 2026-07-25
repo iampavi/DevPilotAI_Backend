@@ -94,6 +94,14 @@ public class QdrantService : IQdrantService
                 point.Payload["symbol_name"] = p.SymbolName;
                 point.Payload["chunk_type"] = p.ChunkType;
 
+                if (p.Metadata != null)
+                {
+                    foreach (var kvp in p.Metadata)
+                    {
+                        point.Payload[kvp.Key] = kvp.Value;
+                    }
+                }
+
                 return point;
             }).ToList();
 

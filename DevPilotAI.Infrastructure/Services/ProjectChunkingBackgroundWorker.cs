@@ -132,20 +132,63 @@ public class ProjectChunkingBackgroundWorker : BackgroundService
                     {
                         // Class chunk
                         var classContent = GenerateClassChunkContent(cls);
-                        generatedChunks.Add(CreateChunkInstance(jobItem.ProjectId, file.Id, cls.Id, null, "Class", classContent, cls.Name, file.RelativePath));
+                        generatedChunks.Add(CreateChunkInstance(
+                            projectId: jobItem.ProjectId, 
+                            fileId: file.Id, 
+                            classId: cls.Id, 
+                            methodId: null, 
+                            chunkType: "Class", 
+                            content: classContent, 
+                            symbolName: cls.Name, 
+                            relativePath: file.RelativePath,
+                            namespaceName: cls.Namespace,
+                            className: cls.Name,
+                            startLine: cls.StartLine,
+                            endLine: cls.EndLine,
+                            language: "CSharp"
+                        ));
 
                         // Method chunks
                         foreach (var method in cls.Methods)
                         {
                             var methodContent = GenerateMethodChunkContent(cls, method, fileContent);
-                            generatedChunks.Add(CreateChunkInstance(jobItem.ProjectId, file.Id, cls.Id, method.Id, "Method", methodContent, method.Name, file.RelativePath));
+                            generatedChunks.Add(CreateChunkInstance(
+                                projectId: jobItem.ProjectId, 
+                                fileId: file.Id, 
+                                classId: cls.Id, 
+                                methodId: method.Id, 
+                                chunkType: "Method", 
+                                content: methodContent, 
+                                symbolName: method.Name, 
+                                relativePath: file.RelativePath,
+                                namespaceName: cls.Namespace,
+                                className: cls.Name,
+                                methodName: method.Name,
+                                startLine: method.StartLine,
+                                endLine: method.EndLine,
+                                language: "CSharp"
+                            ));
                         }
 
                         // Property chunks
                         foreach (var prop in cls.Properties)
                         {
                             var propContent = GeneratePropertyChunkContent(cls, prop);
-                            generatedChunks.Add(CreateChunkInstance(jobItem.ProjectId, file.Id, cls.Id, null, "Property", propContent, prop.Name, file.RelativePath));
+                            generatedChunks.Add(CreateChunkInstance(
+                                projectId: jobItem.ProjectId, 
+                                fileId: file.Id, 
+                                classId: cls.Id, 
+                                methodId: null, 
+                                chunkType: "Property", 
+                                content: propContent, 
+                                symbolName: prop.Name, 
+                                relativePath: file.RelativePath,
+                                namespaceName: cls.Namespace,
+                                className: cls.Name,
+                                startLine: prop.StartLine,
+                                endLine: prop.EndLine,
+                                language: "CSharp"
+                            ));
                         }
                     }
                 }
@@ -155,7 +198,34 @@ public class ProjectChunkingBackgroundWorker : BackgroundService
                     var fileChunks = GenerateNonCSharpChunkContents(fileContent, file.RelativePath);
                     for (int i = 0; i < fileChunks.Count; i++)
                     {
-                        generatedChunks.Add(CreateChunkInstance(jobItem.ProjectId, file.Id, null, null, "File", fileChunks[i], $"{file.RelativePath}_part_{i}", file.RelativePath));
+                        int startL = 1;
+                        int endL = 1;
+                        var lineMatch = System.Text.RegularExpressions.Regex.Match(fileChunks[i], @"Lines (\d+)-(\d+)");
+                        if (lineMatch.Success)
+                        {
+                            startL = int.Parse(lineMatch.Groups[1].Value);
+                            endL = int.Parse(lineMatch.Groups[2].Value);
+                        }
+                        else
+                        {
+                            var linesCount = fileChunks[i].Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None).Length;
+                            startL = 1;
+                            endL = Math.Max(1, linesCount);
+                        }
+
+                        generatedChunks.Add(CreateChunkInstance(
+                            projectId: jobItem.ProjectId, 
+                            fileId: file.Id, 
+                            classId: null, 
+                            methodId: null, 
+                            chunkType: "File", 
+                            content: fileChunks[i], 
+                            symbolName: $"{file.RelativePath}_part_{i}", 
+                            relativePath: file.RelativePath,
+                            startLine: startL,
+                            endLine: endL,
+                            language: file.Language
+                        ));
                     }
                 }
             }
@@ -247,7 +317,8 @@ public class ProjectChunkingBackgroundWorker : BackgroundService
                             FileId: chunk.ParsedFileId,
                             FilePath: filePath,
                             SymbolName: symbolName,
-                            ChunkType: chunk.ChunkType
+                            ChunkType: chunk.ChunkType,
+                            Metadata: metaDict
                         ));
                     }
 
@@ -376,14 +447,41 @@ public class ProjectChunkingBackgroundWorker : BackgroundService
         return chunks;
     }
 
-    private CodeChunk CreateChunkInstance(Guid projectId, Guid fileId, Guid? classId, Guid? methodId, string chunkType, string content, string symbolName, string relativePath)
+    private CodeChunk CreateChunkInstance(
+        Guid projectId, 
+        Guid fileId, 
+        Guid? classId, 
+        Guid? methodId, 
+        string chunkType, 
+        string content, 
+        string symbolName, 
+        string relativePath,
+        string? namespaceName = null,
+        string? className = null,
+        string? methodName = null,
+        int? startLine = null,
+        int? endLine = null,
+        string? language = null)
     {
         var hash = ComputeSha256Hash(content);
+        var fileExt = Path.GetExtension(relativePath).ToLowerInvariant();
+        
         var metaDict = new Dictionary<string, string>
         {
             { "symbol_name", symbolName },
-            { "file_path", relativePath }
+            { "file_path", relativePath },
+            { "project_id", projectId.ToString() },
+            { "chunk_type", chunkType },
+            { "file_extension", fileExt },
+            { "language", language ?? MapExtensionToLanguage(fileExt) }
         };
+
+        if (!string.IsNullOrEmpty(namespaceName)) metaDict["namespace"] = namespaceName;
+        if (!string.IsNullOrEmpty(className)) metaDict["class_name"] = className;
+        if (!string.IsNullOrEmpty(methodName)) metaDict["method_name"] = methodName;
+        if (startLine.HasValue) metaDict["start_line"] = startLine.Value.ToString();
+        if (endLine.HasValue) metaDict["end_line"] = endLine.Value.ToString();
+
         var meta = JsonSerializer.Serialize(metaDict);
 
         return new CodeChunk
@@ -398,6 +496,25 @@ public class ProjectChunkingBackgroundWorker : BackgroundService
             TokenCount = content.Length / 4, // Simple character heuristic
             Hash = hash,
             Metadata = meta
+        };
+    }
+
+    private string MapExtensionToLanguage(string ext)
+    {
+        return ext switch
+        {
+            ".cs" => "CSharp",
+            ".js" => "JavaScript",
+            ".jsx" => "JavaScript",
+            ".ts" => "TypeScript",
+            ".tsx" => "TypeScript",
+            ".json" => "JSON",
+            ".xml" => "XML",
+            ".md" => "Markdown",
+            ".css" => "CSS",
+            ".html" => "HTML",
+            ".sql" => "SQL",
+            _ => "Text"
         };
     }
 

@@ -45,8 +45,8 @@ public class AiChatService : IAiChatService
         _logger = logger;
 
         _summarizeAfterCount = int.TryParse(configuration["RagSettings:SummarizeAfterMessagesCount"], out var limit) ? limit : 25;
-        _defaultProviderName = configuration["EmbeddingSettings:Provider"] ?? "Mock";
-        _defaultModelName = configuration["EmbeddingSettings:Model"] ?? "gpt-4";
+        _defaultProviderName = configuration["ChatSettings:Provider"] ?? configuration["EmbeddingSettings:Provider"] ?? "Mock";
+        _defaultModelName = configuration["ChatSettings:Model"] ?? configuration["EmbeddingSettings:Model"] ?? "gpt-4";
     }
 
     public async Task<ChatSessionDto> CreateSessionAsync(Guid projectId, string title, CancellationToken cancellationToken = default)
@@ -182,6 +182,11 @@ public class AiChatService : IAiChatService
 
         _logger.LogInformation("RAG Complete. Telemetry Details: Session={SessionId}, Chunks={ChunksCount}, LatencyMs={Latency}, PromptTokens={PromptTokens}, CompletionTokens={CompletionTokens}",
             sessionId, contextChunks.Count, stopwatch.ElapsedMilliseconds, userMessage.TokenCount, assistantMessage.TokenCount);
+
+        foreach (var chunk in contextChunks)
+        {
+            _logger.LogInformation("Chunk {ChunkId} explainability: {Explanation}", chunk.Id, chunk.RetrievalExplanation);
+        }
 
         var totalMessagesCount = session.Messages.Count + 2;
         if (totalMessagesCount >= _summarizeAfterCount)

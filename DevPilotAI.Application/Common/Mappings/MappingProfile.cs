@@ -40,7 +40,8 @@ public class MappingProfile : Profile
 
         CreateMap<CodeChunk, CodeChunkDto>()
             .ForMember(dest => dest.StartLine, opt => opt.Ignore())
-            .ForMember(dest => dest.EndLine, opt => opt.Ignore());
+            .ForMember(dest => dest.EndLine, opt => opt.Ignore())
+            .ForMember(dest => dest.RetrievalExplanation, opt => opt.Ignore());
         CreateMap<ProjectChunkingJob, ProjectChunkingJobDto>()
             .ForMember(dest => dest.Status, opt => opt.MapFrom(src => src.Status.ToString()));
 

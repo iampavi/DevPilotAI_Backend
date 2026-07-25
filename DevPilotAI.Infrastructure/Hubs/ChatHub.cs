@@ -171,7 +171,8 @@ public class ChatHub : Hub<IChatHubClient>
                 PromptTokens = userMessage.TokenCount,
                 CompletionTokens = assistantMessage.TokenCount,
                 LatencyMilliseconds = stopwatch.ElapsedMilliseconds,
-                SimilarityScores = contextChunks.Select(_ => 0.9).ToList()
+                SimilarityScores = contextChunks.Select(_ => 0.9).ToList(),
+                RetrievalScoresExplanation = contextChunks.Select(c => c.RetrievalExplanation).ToList()
             };
 
             await Clients.Caller.ChatCompleted(sessionId, diagnostics);

@@ -11,6 +11,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Configuration;
 
 namespace DevPilotAI.Infrastructure.Services;
 
@@ -60,6 +61,7 @@ public class ProjectParseBackgroundWorker : BackgroundService
         var context = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
         var parser = scope.ServiceProvider.GetRequiredService<ICSharpParser>();
         var chunkingScheduler = scope.ServiceProvider.GetRequiredService<IChunkingScheduler>();
+        var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
 
         var jobEntity = await context.ProjectParseJobs.FirstOrDefaultAsync(j => j.Id == jobItem.JobId, cancellationToken);
         if (jobEntity == null)
@@ -88,7 +90,12 @@ public class ProjectParseBackgroundWorker : BackgroundService
                 throw new DirectoryNotFoundException($"Project source directory '{jobItem.SourceLocation}' was not found.");
             }
 
-            var matchedFiles = GetProjectFiles(jobItem.SourceLocation);
+            var ignoredDirs = configuration.GetSection("RetrievalSettings:IgnoredDirectories").Get<List<string>>() 
+                ?? new List<string> { "bin", "obj", "node_modules", ".git", "vendor", "dist", "build", "coverage", ".vs", ".idea", ".vscode" };
+            var ignoredFiles = configuration.GetSection("RetrievalSettings:IgnoredFiles").Get<List<string>>() 
+                ?? new List<string> { "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "composer.lock", "packages.lock.json" };
+
+            var matchedFiles = GetProjectFiles(jobItem.SourceLocation, ignoredDirs, ignoredFiles);
             int totalFiles = matchedFiles.Count;
 
             _logger.LogInformation("Scanned project {ProjectId} directory. Found {Count} matching files to parse.", jobItem.ProjectId, totalFiles);
@@ -230,18 +237,16 @@ public class ProjectParseBackgroundWorker : BackgroundService
         }
     }
 
-    private List<string> GetProjectFiles(string basePath)
+    private List<string> GetProjectFiles(string basePath, List<string> ignoredDirs, List<string> ignoredFiles)
     {
         var result = new List<string>();
-        var ignoreDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "bin", "obj", "node_modules", ".git", "vendor"
-        };
-        ScanDirectory(basePath, ignoreDirs, result);
+        var ignoreDirsSet = new HashSet<string>(ignoredDirs, StringComparer.OrdinalIgnoreCase);
+        var ignoreFilesSet = new HashSet<string>(ignoredFiles, StringComparer.OrdinalIgnoreCase);
+        ScanDirectory(basePath, ignoreDirsSet, ignoreFilesSet, result);
         return result;
     }
 
-    private void ScanDirectory(string currentDir, HashSet<string> ignoreDirs, List<string> result)
+    private void ScanDirectory(string currentDir, HashSet<string> ignoreDirs, HashSet<string> ignoreFiles, List<string> result)
     {
         var dirInfo = new DirectoryInfo(currentDir);
         if (ignoreDirs.Contains(dirInfo.Name))
@@ -253,6 +258,13 @@ public class ProjectParseBackgroundWorker : BackgroundService
         {
             foreach (var file in Directory.GetFiles(currentDir))
             {
+                var fileName = Path.GetFileName(file);
+                var fileNameLower = fileName.ToLowerInvariant();
+                if (ignoreFiles.Contains(fileName) || IsIgnoredFile(fileNameLower))
+                {
+                    continue;
+                }
+
                 var ext = Path.GetExtension(file).ToLowerInvariant();
                 if (IsSupportedExtension(ext))
                 {
@@ -262,13 +274,25 @@ public class ProjectParseBackgroundWorker : BackgroundService
 
             foreach (var subDir in Directory.GetDirectories(currentDir))
             {
-                ScanDirectory(subDir, ignoreDirs, result);
+                ScanDirectory(subDir, ignoreDirs, ignoreFiles, result);
             }
         }
         catch (Exception)
         {
             // Skip inaccessible paths
         }
+    }
+
+    private bool IsIgnoredFile(string fileNameLower)
+    {
+        return fileNameLower.EndsWith(".min.js") ||
+               fileNameLower.EndsWith(".min.css") ||
+               fileNameLower.EndsWith(".map") ||
+               fileNameLower.EndsWith(".dll") ||
+               fileNameLower.EndsWith(".exe") ||
+               fileNameLower.EndsWith(".pdb") ||
+               fileNameLower.EndsWith(".cache") ||
+               fileNameLower.EndsWith(".log");
     }
 
     private bool IsSupportedExtension(string ext)

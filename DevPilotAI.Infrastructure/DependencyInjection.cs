@@ -125,6 +125,7 @@ public static class DependencyInjection
         services.AddHttpClient<IChatProvider, OpenAIChatProvider>();
         services.AddHttpClient<IChatProvider, AzureOpenAIChatProvider>();
         services.AddHttpClient<IChatProvider, OllamaChatProvider>();
+        services.AddHttpClient<IChatProvider, GroqChatProvider>();
         services.AddScoped<IChatProvider, MockChatProvider>();
 
         // RAG Search & AI Chat services

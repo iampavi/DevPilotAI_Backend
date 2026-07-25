@@ -12,7 +12,8 @@ public record QdrantPointDto(
     Guid FileId,
     string FilePath,
     string SymbolName,
-    string ChunkType
+    string ChunkType,
+    Dictionary<string, string>? Metadata = null
 );
 
 public interface IQdrantService

@@ -18,4 +18,5 @@ public class CodeChunkDto
     public string Metadata { get; set; } = string.Empty;
     public int StartLine { get; set; }
     public int EndLine { get; set; }
+    public string RetrievalExplanation { get; set; } = string.Empty;
 }

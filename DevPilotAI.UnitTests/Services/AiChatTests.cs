@@ -18,6 +18,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Moq.Protected;
 using Xunit;
 
 namespace DevPilotAI.UnitTests.Services;
@@ -292,6 +293,193 @@ public class AiChatTests
             Assert.Single(dbMessages);
             Assert.Equal("system", dbMessages[0].Role);
             Assert.Contains("[Summary of earlier discussion]", dbMessages[0].Content);
+        }
+        finally
+        {
+            await context.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
+    public async Task GroqChatProvider_ShouldReturnResponse_WhenApiSucceeds()
+    {
+        var mockResponseJson = @"
+        {
+            ""choices"": [
+                {
+                    ""message"": {
+                        ""role"": ""assistant"",
+                        ""content"": ""Hello from Groq!""
+                    }
+                }
+            ],
+            ""usage"": {
+                ""total_tokens"": 42
+            }
+        }";
+
+        var handlerMock = new Mock<HttpMessageHandler>(MockBehavior.Strict);
+        handlerMock
+            .Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = System.Net.HttpStatusCode.OK,
+                Content = new StringContent(mockResponseJson, System.Text.Encoding.UTF8, "application/json")
+            });
+
+        var httpClient = new HttpClient(handlerMock.Object);
+        var inMemorySettings = new Dictionary<string, string> {
+            {"ChatSettings:ApiKey", "test-key"},
+            {"ChatSettings:BaseUrl", "https://api.groq.com/openai/v1"}
+        };
+        var config = new ConfigurationBuilder().AddInMemoryCollection(inMemorySettings!).Build();
+        
+        var provider = new GroqChatProvider(httpClient, config, NullLogger<GroqChatProvider>.Instance);
+
+        var messages = new List<ChatMessageDto>
+        {
+            new() { Role = "user", Content = "Hi" }
+        };
+        var settings = new ChatSettingsDto { Model = "llama-3.3-70b-versatile" };
+
+        var result = await provider.GetResponseAsync(messages, settings, CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal("Hello from Groq!", result.Content);
+        Assert.Equal(42, result.TokenCount);
+    }
+
+    [Fact]
+    public async Task SemanticRetrieval_ShouldPrioritizeSymbolNameMatch()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlServer("Server=localhost;Database=DevPilotAI_AiChatTests_SymbolMatch;Trusted_Connection=True;TrustServerCertificate=True;")
+            .Options;
+
+        var context = new ApplicationDbContext(options, new DateTimeProvider(), new Mock<ICurrentUserService>().Object);
+        await context.Database.EnsureDeletedAsync();
+        await context.Database.EnsureCreatedAsync();
+
+        try
+        {
+            // Seed system user
+            var systemUserId = "D035B9FE-B7FE-438B-B0D1-1C349C3AF21F";
+            var systemUser = new ApplicationUser
+            {
+                Id = Guid.Parse(systemUserId),
+                UserName = "system@devpilot.ai",
+                Email = "system@devpilot.ai",
+                FirstName = "System",
+                LastName = "User"
+            };
+            context.Users.Add(systemUser);
+            await context.SaveChangesAsync();
+
+            var workspaceId = Guid.NewGuid();
+            var workspace = new Workspace 
+            { 
+                Id = workspaceId, 
+                Name = "TestWorkspace",
+                UserId = Guid.Parse(systemUserId)
+            };
+            context.Workspaces.Add(workspace);
+
+            var projectId = Guid.NewGuid();
+            var project = new Project 
+            { 
+                Id = projectId, 
+                WorkspaceId = workspaceId,
+                Name = "Test Project",
+                SourceLocation = "Local"
+            };
+            context.Projects.Add(project);
+            await context.SaveChangesAsync();
+
+            var fileId = Guid.NewGuid();
+            var parsedFile = new ParsedFile
+            {
+                Id = fileId,
+                ProjectId = projectId,
+                RelativePath = "Repositories/ResumeRepository.cs",
+                Language = "C#"
+            };
+            context.ParsedFiles.Add(parsedFile);
+            
+            var classId = Guid.NewGuid();
+            var parsedClass = new ParsedClass
+            {
+                Id = classId,
+                ParsedFileId = fileId,
+                Name = "ResumeRepository",
+                FullName = "Repositories.ResumeRepository"
+            };
+            context.ParsedClasses.Add(parsedClass);
+            await context.SaveChangesAsync();
+
+            // Chunk1 is unrelated but has high semantic score (sim 0.95, rank 0 in Qdrant)
+            var chunk1 = new CodeChunk 
+            { 
+                Id = Guid.NewGuid(), 
+                ProjectId = projectId, 
+                ParsedFileId = fileId, 
+                Content = "public class OrderService { }", 
+                ChunkType = "Class",
+                Metadata = "{\"symbol_name\":\"OrderService\",\"class_name\":\"OrderService\",\"file_path\":\"Services/OrderService.cs\"}"
+            };
+            
+            // Chunk2 matches ResumeRepository class name (and has lower semantic score - sim 0.85, rank 2 in Qdrant)
+            var chunk2 = new CodeChunk 
+            { 
+                Id = Guid.NewGuid(), 
+                ProjectId = projectId, 
+                ParsedFileId = fileId, 
+                ParsedClassId = classId,
+                Content = "public class ResumeRepository { }", 
+                ChunkType = "Class",
+                Metadata = "{\"symbol_name\":\"ResumeRepository\",\"class_name\":\"ResumeRepository\",\"file_path\":\"Repositories/ResumeRepository.cs\"}"
+            };
+
+            context.CodeChunks.AddRange(chunk1, chunk2);
+            await context.SaveChangesAsync();
+
+            var embeddingMock = new Mock<IEmbeddingService>();
+            embeddingMock.Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new float[1536]);
+
+            var qdrantMock = new Mock<IQdrantService>();
+            // Qdrant returns chunk1 (unrelated) first, and chunk2 (matching) second
+            qdrantMock.Setup(q => q.SearchSimilarityAsync(
+                It.IsAny<string>(),
+                It.IsAny<float[]>(),
+                It.IsAny<Guid>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<Guid>
+                {
+                    chunk1.Id,
+                    chunk2.Id
+                });
+
+            var inMemorySettings = new Dictionary<string, string> {
+                {"RagSettings:TopK", "3"},
+                {"RagSettings:SimilarityThreshold", "0.50"},
+                {"RagSettings:MaxContextChunks", "5"}
+            };
+            var config = new ConfigurationBuilder().AddInMemoryCollection(inMemorySettings!).Build();
+
+            var retrievalService = new SemanticRetrievalService(qdrantMock.Object, embeddingMock.Object, context, config, NullLogger<SemanticRetrievalService>.Instance);
+
+            // Act - Query specifically asks for "ResumeRepository"
+            var results = await retrievalService.RetrieveRelevantContextAsync(projectId, "Explain ResumeRepository database implementation", CancellationToken.None);
+
+            // Assert - chunk2 (ResumeRepository) should be retrieved first because of the Class Name boost (+1.0) and File Name boost (+1.5)
+            Assert.Equal(2, results.Count);
+            Assert.Equal(chunk2.Id, results[0].Id); // ResumeRepository is first!
+            Assert.Equal(chunk1.Id, results[1].Id); // OrderService is second!
         }
         finally
         {

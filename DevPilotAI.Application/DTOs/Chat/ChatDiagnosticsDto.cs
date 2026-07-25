@@ -9,4 +9,5 @@ public class ChatDiagnosticsDto
     public int CompletionTokens { get; set; }
     public long LatencyMilliseconds { get; set; }
     public List<double> SimilarityScores { get; set; } = new();
+    public List<string> RetrievalScoresExplanation { get; set; } = new();
 }
