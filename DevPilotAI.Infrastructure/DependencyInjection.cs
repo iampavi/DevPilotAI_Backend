@@ -1,6 +1,7 @@
 using DevPilotAI.Application.Common.Interfaces;
 using DevPilotAI.Infrastructure.Services;
 using DevPilotAI.Infrastructure.Services.EmbeddingProviders;
+using DevPilotAI.Infrastructure.Services.ChatProviders;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -68,6 +69,19 @@ public static class DependencyInjection
                 IssuerSigningKey = new SymmetricSecurityKey(key),
                 ClockSkew = TimeSpan.Zero
             };
+            options.Events = new JwtBearerEvents
+            {
+                OnMessageReceived = context =>
+                {
+                    var accessToken = context.Request.Query["access_token"];
+                    var path = context.HttpContext.Request.Path;
+                    if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                    {
+                        context.Token = accessToken;
+                    }
+                    return Task.CompletedTask;
+                }
+            };
         });
 
         // Register Authorization Policies
@@ -106,6 +120,18 @@ public static class DependencyInjection
         services.AddScoped<ISemanticSearchService, SemanticSearchService>();
         services.AddSingleton<IProjectChunkingQueue, ProjectChunkingQueue>();
         services.AddHostedService<ProjectChunkingBackgroundWorker>();
+
+        // Chat Providers (Isolated via Typed HttpClients)
+        services.AddHttpClient<IChatProvider, OpenAIChatProvider>();
+        services.AddHttpClient<IChatProvider, AzureOpenAIChatProvider>();
+        services.AddHttpClient<IChatProvider, OllamaChatProvider>();
+        services.AddScoped<IChatProvider, MockChatProvider>();
+
+        // RAG Search & AI Chat services
+        services.AddScoped<IChatProviderFactory, ChatProviderFactory>();
+        services.AddScoped<ISemanticRetrievalService, SemanticRetrievalService>();
+        services.AddScoped<IPromptBuilder, PromptBuilder>();
+        services.AddScoped<IAiChatService, AiChatService>();
 
         return services;
     }

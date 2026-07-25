@@ -20,6 +20,9 @@ public interface IApplicationDbContext
     DbSet<ProjectParseJob> ProjectParseJobs { get; }
     DbSet<CodeChunk> CodeChunks { get; }
     DbSet<ProjectChunkingJob> ProjectChunkingJobs { get; }
+    DbSet<ChatSession> ChatSessions { get; }
+    DbSet<ChatMessage> ChatMessages { get; }
+    DbSet<AiUsageLog> AiUsageLogs { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken);
     int SaveChanges();

@@ -11,6 +11,10 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ASPNETCORE_HTTP_PORTS=8080
+      - QdrantSettings__Host=qdrant
+      - ConnectionStrings__DefaultConnection=Server=host.docker.internal;Database=DevPilotAI;User Id=sa;Password=YourPassword123!;TrustServerCertificate=True;
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - qdrant
 

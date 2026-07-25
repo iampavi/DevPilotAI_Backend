@@ -37,6 +37,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<ProjectParseJob> ProjectParseJobs => Set<ProjectParseJob>();
     public DbSet<CodeChunk> CodeChunks => Set<CodeChunk>();
     public DbSet<ProjectChunkingJob> ProjectChunkingJobs => Set<ProjectChunkingJob>();
+    public DbSet<ChatSession> ChatSessions => Set<ChatSession>();
+    public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+    public DbSet<AiUsageLog> AiUsageLogs => Set<AiUsageLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -50,6 +53,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         modelBuilder.Entity<Project>().HasQueryFilter(p => !p.IsDeleted);
         modelBuilder.Entity<ProjectSettings>().HasQueryFilter(ps => !ps.IsDeleted);
         modelBuilder.Entity<ProjectIndex>().HasQueryFilter(idx => !idx.IsDeleted);
+        modelBuilder.Entity<ChatSession>().HasQueryFilter(s => !s.IsDeleted);
     }
 
     public override int SaveChanges()

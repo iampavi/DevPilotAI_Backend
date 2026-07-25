@@ -25,15 +25,17 @@ try
     // Register Swagger & Health Checks
     builder.Services.AddSwaggerDocumentation();
     builder.Services.AddHealthChecks();
+    builder.Services.AddSignalR();
 
     // CORS policy for Dev/Frontend communication
     builder.Services.AddCors(options =>
     {
         options.AddPolicy("DefaultPolicy", policy =>
         {
-            policy.AllowAnyOrigin()
-                  .AllowAnyHeader()
-                  .AllowAnyMethod();
+            policy.AllowAnyHeader()
+                  .AllowAnyMethod()
+                  .SetIsOriginAllowed(_ => true)
+                  .AllowCredentials();
         });
     });
 
@@ -57,6 +59,7 @@ try
     app.UseAuthorization();
 
     app.MapControllers();
+    app.MapHub<DevPilotAI.Infrastructure.Hubs.ChatHub>("/hubs/chat");
 
     // Map custom JSON health checks
     app.MapHealthChecks("/health", new HealthCheckOptions

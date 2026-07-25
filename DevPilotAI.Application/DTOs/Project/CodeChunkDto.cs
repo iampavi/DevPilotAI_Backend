@@ -16,4 +16,6 @@ public class CodeChunkDto
     public string EmbeddingModel { get; set; } = string.Empty;
     public int EmbeddingVersion { get; set; }
     public string Metadata { get; set; } = string.Empty;
+    public int StartLine { get; set; }
+    public int EndLine { get; set; }
 }
