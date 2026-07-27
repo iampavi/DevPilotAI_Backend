@@ -133,6 +133,11 @@ public static class DependencyInjection
         services.AddScoped<ISemanticRetrievalService, SemanticRetrievalService>();
         services.AddScoped<IPromptBuilder, PromptBuilder>();
         services.AddScoped<IAiChatService, AiChatService>();
+        services.AddScoped<ICopilotService, CopilotService>();
+        services.AddScoped<SymbolGraphResolver>();
+        services.AddScoped<IRepositoryGraphService, RepositoryGraphService>();
+        services.AddScoped<IRepositoryContextExpander, RepositoryContextExpander>();
+        services.AddScoped<IProjectIndexSynchronizationService, ProjectIndexSynchronizationService>();
 
         return services;
     }

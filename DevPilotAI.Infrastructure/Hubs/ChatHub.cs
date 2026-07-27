@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using AutoMapper;
 using DevPilotAI.Application.Common.Interfaces;
 using DevPilotAI.Application.DTOs.Chat;
+using DevPilotAI.Application.DTOs.Project;
 using DevPilotAI.Domain.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
@@ -110,7 +111,13 @@ public class ChatHub : Hub<IChatHubClient>
                 .Select(m => _mapper.Map<ChatMessageDto>(m))
                 .ToList();
 
-            var prompts = _promptBuilder.BuildRagPrompt(promptMode, userQuestion, contextChunks, messageHistoryDtos);
+            var mappedChunks = _mapper.Map<List<CodeChunkDto>>(contextChunks);
+            var repoContext = new RepositoryContextDto
+            {
+                SeedChunks = mappedChunks
+            };
+
+            var prompts = _promptBuilder.BuildRagPrompt(promptMode, userQuestion, repoContext, messageHistoryDtos);
 
             var provider = _providerFactory.GetProvider(settings.Provider);
 

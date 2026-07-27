@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using DevPilotAI.Application.Common.Interfaces;
 using DevPilotAI.Application.DTOs.Chat;
 using DevPilotAI.Application.DTOs.Project;
@@ -23,7 +24,7 @@ public class PromptBuilder : IPromptBuilder
     public List<ChatMessageDto> BuildRagPrompt(
         string templateMode,
         string userQuestion,
-        List<CodeChunkDto> contextChunks,
+        RepositoryContextDto repositoryContext,
         List<ChatMessageDto> history)
     {
         var templatesSection = _configuration.GetSection("RagSettings:PromptTemplates");
@@ -35,18 +36,38 @@ public class PromptBuilder : IPromptBuilder
         }
 
         var contextBuilder = new StringBuilder();
-        foreach (var chunk in contextChunks)
+
+        // 1. Append Relationships Summary if any exist
+        if (repositoryContext.Relationships != null && repositoryContext.Relationships.Any())
         {
-            contextBuilder.AppendLine($"File: {chunk.Metadata ?? "Unknown File"}");
-            contextBuilder.AppendLine("```");
-            contextBuilder.AppendLine(chunk.Content);
-            contextBuilder.AppendLine("```");
-            contextBuilder.AppendLine("---");
+            contextBuilder.AppendLine("=========================================");
+            contextBuilder.AppendLine("REPOSITORY RELATIONSHIPS");
+            contextBuilder.AppendLine("=========================================");
+            foreach (var rel in repositoryContext.Relationships)
+            {
+                contextBuilder.AppendLine($"- {rel.FromSymbol} {rel.RelationshipType} {rel.ToSymbol}");
+            }
+            contextBuilder.AppendLine();
         }
+
+        // 2. Combine and format all chunks grouped by Namespace ➔ File ➔ Symbol
+        var allChunks = repositoryContext.SeedChunks.Concat(repositoryContext.ExpandedChunks).ToList();
+        var groupedString = FormatGroupedContext(allChunks);
+        contextBuilder.Append(groupedString);
 
         var contextString = contextBuilder.ToString();
 
-        var systemContent = template
+        var systemPrefix = "Repository Rules:\n" +
+                           "- Repository context is the only source of truth.\n" +
+                           "- Never fabricate missing information.\n" +
+                           "- Never assume code exists.\n" +
+                           "- Never create endpoints that were not retrieved.\n" +
+                           "- Never generate DTOs not present in context.\n" +
+                           "- If context is insufficient, say so.\n" +
+                           "- Never use your general C# knowledge when the repository does not provide evidence.\n" +
+                           "- Always cite retrieved symbols and source files/line numbers whenever possible.\n\n";
+
+        var systemContent = systemPrefix + template
             .Replace("{context}", contextString)
             .Replace("{question}", userQuestion);
 
@@ -94,6 +115,73 @@ public class PromptBuilder : IPromptBuilder
         promptList.Add(userMessage);
 
         return promptList;
+    }
+
+    private string FormatGroupedContext(List<CodeChunkDto> chunks)
+    {
+        if (chunks == null || !chunks.Any())
+            return string.Empty;
+
+        var contextBuilder = new StringBuilder();
+
+        var grouped = chunks.Select(c => {
+            string filePath = "Unknown File";
+            string ns = "Global";
+            string symbol = c.ChunkType;
+
+            try
+            {
+                var metaDict = JsonSerializer.Deserialize<Dictionary<string, string>>(c.Metadata);
+                if (metaDict != null)
+                {
+                    if (metaDict.TryGetValue("file_path", out var path) && !string.IsNullOrEmpty(path))
+                        filePath = path;
+                    if (metaDict.TryGetValue("namespace", out var nsp) && !string.IsNullOrEmpty(nsp))
+                        ns = nsp;
+                    if (metaDict.TryGetValue("class_name", out var cls) && !string.IsNullOrEmpty(cls))
+                        symbol = cls;
+                    else if (metaDict.TryGetValue("symbol_name", out var sym) && !string.IsNullOrEmpty(sym))
+                        symbol = sym;
+                }
+            }
+            catch { }
+
+            return new { Chunk = c, FilePath = filePath, Namespace = ns, Symbol = symbol };
+        })
+        .GroupBy(x => x.Namespace)
+        .OrderBy(g => g.Key);
+
+        foreach (var nsGroup in grouped)
+        {
+            contextBuilder.AppendLine("=========================================");
+            contextBuilder.AppendLine($"NAMESPACE: {nsGroup.Key}");
+            contextBuilder.AppendLine("=========================================");
+            contextBuilder.AppendLine();
+
+            var fileGroups = nsGroup.GroupBy(x => x.FilePath).OrderBy(g => g.Key);
+            foreach (var fileGroup in fileGroups)
+            {
+                contextBuilder.AppendLine($"--- FILE: {fileGroup.Key} ---");
+                contextBuilder.AppendLine();
+
+                var symbolGroups = fileGroup.GroupBy(x => x.Symbol).OrderBy(g => g.Key);
+                foreach (var symbolGroup in symbolGroups)
+                {
+                    contextBuilder.AppendLine($"## SYMBOL: {symbolGroup.Key}");
+                    foreach (var item in symbolGroup)
+                    {
+                        contextBuilder.AppendLine("```csharp");
+                        contextBuilder.AppendLine(item.Chunk.Content);
+                        contextBuilder.AppendLine("```");
+                        contextBuilder.AppendLine();
+                    }
+                }
+                contextBuilder.AppendLine("-----------------------------------------");
+                contextBuilder.AppendLine();
+            }
+        }
+
+        return contextBuilder.ToString();
     }
 
     private int EstimateTokens(string text)

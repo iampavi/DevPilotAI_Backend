@@ -20,7 +20,7 @@ public class SendChatMessageRequest
 {
     public string UserQuestion { get; set; } = null!;
     public string PromptMode { get; set; } = "ExplainCode";
-    public ChatSettingsDto? SettingsOverride { get; set; }
+    public ChatSettingsOverrideDto? SettingsOverride { get; set; }
 }
 
 [Authorize]

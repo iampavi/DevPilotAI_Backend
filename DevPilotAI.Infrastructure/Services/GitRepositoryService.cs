@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 using DevPilotAI.Application.Common.Interfaces;
 using DevPilotAI.Shared.Common;
 using LibGit2Sharp;
-using LibGit2Sharp.Handlers;
 
 namespace DevPilotAI.Infrastructure.Services;
 
@@ -23,7 +22,7 @@ public class GitRepositoryService : IGitRepositoryService
         {
             if (Directory.Exists(destinationPath))
             {
-                Directory.Delete(destinationPath, true);
+                SafeDeleteDirectory(destinationPath);
             }
 
             var options = new CloneOptions
@@ -64,6 +63,44 @@ public class GitRepositoryService : IGitRepositoryService
         catch (Exception ex)
         {
             return Task.FromResult(Result.Failure(new Error("Git.CloneError", ex.Message)));
+        }
+    }
+
+    private void SafeDeleteDirectory(string path)
+    {
+        if (!Directory.Exists(path)) return;
+
+        var directory = new DirectoryInfo(path);
+        
+        // Remove read-only attributes on files
+        foreach (var file in directory.GetFiles("*", SearchOption.AllDirectories))
+        {
+            try
+            {
+                file.Attributes = FileAttributes.Normal;
+            }
+            catch {}
+        }
+
+        // Remove read-only attributes on subdirectories
+        foreach (var dir in directory.GetDirectories("*", SearchOption.AllDirectories))
+        {
+            try
+            {
+                dir.Attributes = FileAttributes.Normal;
+            }
+            catch {}
+        }
+
+        try
+        {
+            Directory.Delete(path, true);
+        }
+        catch
+        {
+            // If standard delete fails, retry after a short delay
+            Thread.Sleep(50);
+            Directory.Delete(path, true);
         }
     }
 }

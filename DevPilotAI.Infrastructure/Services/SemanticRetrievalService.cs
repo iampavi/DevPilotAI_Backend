@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -25,18 +26,22 @@ public class SemanticRetrievalService : ISemanticRetrievalService
     private readonly double _similarityThreshold;
     private readonly int _maxContextChunks;
 
+    private readonly SymbolGraphResolver _symbolGraphResolver;
+
     public SemanticRetrievalService(
         IQdrantService qdrantService,
         IEmbeddingService embeddingService,
         IApplicationDbContext context,
         IConfiguration configuration,
-        ILogger<SemanticRetrievalService> logger)
+        ILogger<SemanticRetrievalService> logger,
+        SymbolGraphResolver symbolGraphResolver)
     {
         _qdrantService = qdrantService;
         _embeddingService = embeddingService;
         _context = context;
         _logger = logger;
         _configuration = configuration;
+        _symbolGraphResolver = symbolGraphResolver;
 
         // Try reading configuration from RetrievalSettings section first, fallback to RagSettings
         _topK = int.TryParse(configuration["RetrievalSettings:TopK"] ?? configuration["RagSettings:TopK"], out var k) ? k : 10;
@@ -46,7 +51,16 @@ public class SemanticRetrievalService : ISemanticRetrievalService
 
     public async Task<List<CodeChunkDto>> RetrieveRelevantContextAsync(Guid projectId, string query, CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Starting semantic retrieval for project {ProjectId} with query: {Query}", projectId, query);
+        var result = await RetrieveDetailedContextAsync(projectId, query, cancellationToken);
+        return result.Chunks;
+    }
+
+    public async Task<DetailedRetrievalResult> RetrieveDetailedContextAsync(Guid projectId, string query, CancellationToken cancellationToken = default)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        _logger.LogInformation("Starting detailed semantic retrieval for project {ProjectId} with query: {Query}", projectId, query);
+
+        var ignoredReasons = new List<string>();
 
         // 0. Extract potential identifiers from query
         var words = System.Text.RegularExpressions.Regex.Matches(query, @"[A-Za-z_][A-Za-z0-9_]*")
@@ -65,6 +79,15 @@ public class SemanticRetrievalService : ISemanticRetrievalService
             "project", "workspace", "return", "using", "namespace", "get", "set"
         };
         var identifiers = words.Where(w => !ignoredKeywords.Contains(w)).ToList();
+
+        // Query Domain Classification
+        bool isBackendQuery = query.Contains("c#", StringComparison.OrdinalIgnoreCase) ||
+                              query.Contains("csharp", StringComparison.OrdinalIgnoreCase) ||
+                              new[] { "controller", "repository", "service", "db", "context", "entity", "dto", "backend", "persistence" }
+                                 .Any(k => query.Contains(k, StringComparison.OrdinalIgnoreCase));
+
+        bool isFrontendQuery = new[] { "react", "jsx", "tsx", "css", "style", "frontend", "component", "widget", "js", "html" }
+                                 .Any(k => query.Contains(k, StringComparison.OrdinalIgnoreCase));
 
         var symbolChunks = new List<CodeChunk>();
         if (identifiers.Any())
@@ -122,9 +145,21 @@ public class SemanticRetrievalService : ISemanticRetrievalService
 
         // 3. Resolve combined SQL candidates
         var allChunkIds = qdrantResults.Union(symbolChunks.Select(c => c.Id)).ToList();
+        int candidateChunksCount = allChunkIds.Count;
+
         if (allChunkIds.Count == 0)
         {
-            return new List<CodeChunkDto>();
+            stopwatch.Stop();
+            return new DetailedRetrievalResult
+            {
+                Chunks = [],
+                CandidateChunks = 0,
+                FilteredChunks = 0,
+                FinalChunks = 0,
+                IgnoredReasons = [],
+                AverageSimilarity = 0.0,
+                RetrievalTime = stopwatch.Elapsed
+            };
         }
 
         var chunks = await _context.CodeChunks
@@ -134,14 +169,14 @@ public class SemanticRetrievalService : ISemanticRetrievalService
             .Where(c => c.ProjectId == projectId && allChunkIds.Contains(c.Id))
             .ToListAsync(cancellationToken);
 
-        // Map mock similarity score based on order/rank: Rank 0 gets 0.95, Rank 1 gets 0.90, etc.
+        // Map mock similarity score based on order/rank
         var scoresMap = new Dictionary<Guid, double>();
         for (int i = 0; i < qdrantResults.Count; i++)
         {
             scoresMap[qdrantResults[i]] = Math.Max(0.5, 0.95 - (i * 0.05));
         }
 
-        // Load ignored directories and files from configurations
+        // Load ignored directories and files
         var ignoredDirs = _configuration.GetSection("RetrievalSettings:IgnoredDirectories").Get<List<string>>() 
             ?? new List<string> { "bin", "obj", "node_modules", ".git", "vendor", "dist", "build", "coverage", ".vs", ".idea", ".vscode" };
         var ignoredFiles = _configuration.GetSection("RetrievalSettings:IgnoredFiles").Get<List<string>>() 
@@ -150,6 +185,7 @@ public class SemanticRetrievalService : ISemanticRetrievalService
         var cleanChunks = new List<CodeChunk>();
         var seenHashes = new HashSet<string>();
         var seenContents = new HashSet<string>();
+        int ignoredChunksCount = 0;
 
         foreach (var chunk in chunks)
         {
@@ -159,18 +195,75 @@ public class SemanticRetrievalService : ISemanticRetrievalService
                 filePath = chunk.ChunkType.ToLowerInvariant();
             }
 
-            // Ignored Directories
+            // CSS Exclusions (unless query explicitly asks for style/css)
+            if ((filePath.EndsWith(".css", StringComparison.OrdinalIgnoreCase) || chunk.ChunkType.Equals("css", StringComparison.OrdinalIgnoreCase)) && 
+                !query.Contains("css", StringComparison.OrdinalIgnoreCase) && !query.Contains("style", StringComparison.OrdinalIgnoreCase))
+            {
+                ignoredReasons.Add("CSS");
+                ignoredChunksCount++;
+                continue;
+            }
+
+            // Domain filtering: exclude frontend files for backend queries
+            bool isFrontendAsset = filePath.StartsWith("frontend/") || 
+                                   filePath.StartsWith("frontend\\") || 
+                                   filePath.Contains("/frontend/") ||
+                                   filePath.Contains("\\frontend\\") ||
+                                   filePath.EndsWith(".js", StringComparison.OrdinalIgnoreCase) || 
+                                   filePath.EndsWith(".jsx", StringComparison.OrdinalIgnoreCase) || 
+                                   filePath.EndsWith(".ts", StringComparison.OrdinalIgnoreCase) || 
+                                   filePath.EndsWith(".tsx", StringComparison.OrdinalIgnoreCase) || 
+                                   filePath.EndsWith(".html", StringComparison.OrdinalIgnoreCase);
+
+            if (isBackendQuery && isFrontendAsset)
+            {
+                ignoredReasons.Add("Frontend assets");
+                ignoredChunksCount++;
+                continue;
+            }
+
+            // Domain filtering: exclude backend files for frontend queries
+            bool isBackendAsset = filePath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
+            if (isFrontendQuery && isBackendAsset)
+            {
+                ignoredReasons.Add("Backend source");
+                ignoredChunksCount++;
+                continue;
+            }
+
+            // Generated EF/Designer snapshots exclusions
+            if ((filePath.Contains("migrations", StringComparison.OrdinalIgnoreCase) || 
+                 filePath.EndsWith("modelsnapshot.cs", StringComparison.OrdinalIgnoreCase) || 
+                 filePath.EndsWith(".designer.cs", StringComparison.OrdinalIgnoreCase)) && 
+                !query.Contains("migration", StringComparison.OrdinalIgnoreCase))
+            {
+                ignoredReasons.Add("Generated");
+                ignoredChunksCount++;
+                continue;
+            }
+
+            // Ignored Directories check
             bool inIgnoredDir = ignoredDirs.Any(d => filePath.Contains("/" + d.ToLowerInvariant() + "/") || 
                                                      filePath.Contains("\\" + d.ToLowerInvariant() + "\\") || 
                                                      filePath.StartsWith(d.ToLowerInvariant() + "/") || 
                                                      filePath.StartsWith(d.ToLowerInvariant() + "\\"));
-            if (inIgnoredDir) continue;
+            if (inIgnoredDir)
+            {
+                ignoredReasons.Add("Noisy directory");
+                ignoredChunksCount++;
+                continue;
+            }
 
-            // Ignored Files
+            // Ignored Files check
             var fileName = Path.GetFileName(filePath);
-            if (ignoredFiles.Any(f => f.Equals(fileName, StringComparison.OrdinalIgnoreCase))) continue;
+            if (ignoredFiles.Any(f => f.Equals(fileName, StringComparison.OrdinalIgnoreCase)))
+            {
+                ignoredReasons.Add("Noisy file");
+                ignoredChunksCount++;
+                continue;
+            }
 
-            // Ignored Extensions (dll, exe, pdb, cache, log, min.js, min.css, map)
+            // Binary/Build extensions check
             if (fileName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ||
                 fileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ||
                 fileName.EndsWith(".pdb", StringComparison.OrdinalIgnoreCase) ||
@@ -180,13 +273,17 @@ public class SemanticRetrievalService : ISemanticRetrievalService
                 fileName.EndsWith(".min.css", StringComparison.OrdinalIgnoreCase) ||
                 fileName.EndsWith(".map", StringComparison.OrdinalIgnoreCase))
             {
+                ignoredReasons.Add("Build target");
+                ignoredChunksCount++;
                 continue;
             }
 
-            // Duplicate filter
+            // Duplicate content filter
             var hash = !string.IsNullOrEmpty(chunk.Hash) ? chunk.Hash : chunk.Content;
             if (seenHashes.Contains(hash) || seenContents.Contains(chunk.Content))
             {
+                ignoredReasons.Add("Duplicate");
+                ignoredChunksCount++;
                 continue;
             }
             seenHashes.Add(hash);
@@ -195,7 +292,7 @@ public class SemanticRetrievalService : ISemanticRetrievalService
             cleanChunks.Add(chunk);
         }
 
-        // Apply similarity threshold filter
+        // Apply similarity threshold filter (bypass for direct exact symbols)
         var thresholdFiltered = cleanChunks
             .Where(c => {
                 if (symbolChunks.Any(sc => sc.Id == c.Id)) return true;
@@ -203,11 +300,21 @@ public class SemanticRetrievalService : ISemanticRetrievalService
             })
             .ToList();
 
-        _logger.LogInformation("Found {Count} matches above threshold {Threshold}", thresholdFiltered.Count, _similarityThreshold);
+        int filteredCount = candidateChunksCount - thresholdFiltered.Count;
 
         if (thresholdFiltered.Count == 0)
         {
-            return new List<CodeChunkDto>();
+            stopwatch.Stop();
+            return new DetailedRetrievalResult
+            {
+                Chunks = [],
+                CandidateChunks = candidateChunksCount,
+                FilteredChunks = filteredCount,
+                FinalChunks = 0,
+                IgnoredReasons = ignoredReasons.Distinct().ToList(),
+                AverageSimilarity = 0.0,
+                RetrievalTime = stopwatch.Elapsed
+            };
         }
 
         // Merge adjacent chunks from the same method
@@ -233,9 +340,7 @@ public class SemanticRetrievalService : ISemanticRetrievalService
                 }).ToList();
 
                 var primary = sorted.First();
-                // Merge contents with a separator
                 var combinedContent = string.Join("\n\n// [Merged Adjacent Chunk]\n", sorted.Select(c => c.Content));
-                
                 primary.Content = combinedContent;
                 primary.TokenCount = sorted.Sum(c => c.TokenCount);
 
@@ -244,7 +349,32 @@ public class SemanticRetrievalService : ISemanticRetrievalService
         }
         mergedChunks.AddRange(nonMethodChunks);
 
-        // 4. TF-IDF/Keyword Lexical Re-ranking and Structural Boosting
+        // Fetch relationship-based boosts using SymbolGraphResolver
+        var relatedSymbols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var ident in identifiers)
+        {
+            try
+            {
+                var deps = await _symbolGraphResolver.GetClassDependenciesAsync(projectId, ident, cancellationToken);
+                var dependents = await _symbolGraphResolver.GetClassDependentsAsync(projectId, ident, cancellationToken);
+                foreach (var rDesc in deps.Concat(dependents))
+                {
+                    // Clean symbols like "Constructor Injected: IUserRepository" -> "IUserRepository"
+                    var cleanSymbol = rDesc.Replace("Inherits/Implements:", "").Replace("Constructor Injected:", "").Replace("implements/inherits", "").Replace("injects", "").Split(' ').FirstOrDefault()?.Trim();
+                    if (!string.IsNullOrEmpty(cleanSymbol) && cleanSymbol.Length > 2)
+                    {
+                        relatedSymbols.Add(cleanSymbol);
+                        if (cleanSymbol.StartsWith("I") && cleanSymbol.Length > 1 && char.IsUpper(cleanSymbol[1]))
+                        {
+                            relatedSymbols.Add(cleanSymbol.Substring(1)); // add the concrete class too
+                        }
+                    }
+                }
+            }
+            catch {}
+        }
+
+        // TF-IDF / Keyword splits
         var queryKeywords = query
             .ToLowerInvariant()
             .Split(new[] { ' ', '.', '_', ':', '(', ')', '{', '}', '[', ']', ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
@@ -260,22 +390,15 @@ public class SemanticRetrievalService : ISemanticRetrievalService
             var contentLower = chunk.Content.ToLowerInvariant();
             var filePath = GetMetaValue(chunk.Metadata, "file_path").ToLowerInvariant();
             var symbolName = GetMetaValue(chunk.Metadata, "symbol_name").ToLowerInvariant();
+            var className = GetMetaValue(chunk.Metadata, "class_name").ToLowerInvariant();
             var chunkType = chunk.ChunkType.ToLowerInvariant();
 
-            // Check exact/partial symbol boosts
             double symbolBoostValue = 0.0;
             string symbolExpl = "";
 
             if (identifiers.Any())
             {
-                // Exact SymbolName Match
-                bool isExactSymbol = false;
-                if (!string.IsNullOrEmpty(symbolName))
-                {
-                    isExactSymbol = identifiers.Any(ident => string.Equals(ident, symbolName, StringComparison.OrdinalIgnoreCase));
-                }
-
-                // Exact File Name Match
+                bool isExactSymbol = identifiers.Any(ident => string.Equals(ident, symbolName, StringComparison.OrdinalIgnoreCase));
                 bool isExactFile = false;
                 if (!string.IsNullOrEmpty(filePath))
                 {
@@ -286,7 +409,6 @@ public class SemanticRetrievalService : ISemanticRetrievalService
                         string.Equals(ident, fileNameWithExt, StringComparison.OrdinalIgnoreCase));
                 }
 
-                // Exact Class Name Match
                 bool isExactClass = false;
                 var chunkClassName = GetMetaValue(chunk.Metadata, "class_name");
                 if (string.IsNullOrEmpty(chunkClassName) && chunk.ParsedClass != null)
@@ -298,7 +420,6 @@ public class SemanticRetrievalService : ISemanticRetrievalService
                     isExactClass = identifiers.Any(ident => string.Equals(ident, chunkClassName, StringComparison.OrdinalIgnoreCase));
                 }
 
-                // Partial Match
                 bool isPartial = false;
                 if (!isExactSymbol && !isExactFile && !isExactClass)
                 {
@@ -336,7 +457,7 @@ public class SemanticRetrievalService : ISemanticRetrievalService
             finalScore += similarityScore;
             expl += $", Semantic: {similarityScore:F2}";
 
-            // 1. Lexical Keyword match score
+            // Keyword lexical match boost
             double lexicalScore = 0.0;
             if (queryKeywords.Count > 0)
             {
@@ -350,94 +471,50 @@ public class SemanticRetrievalService : ISemanticRetrievalService
                 expl += $", Lexical: +{lexicalWeight:F2}";
             }
 
-            // 2. Folder Weights & Symbol boosting
-            double boost = 0.0;
+            // Relationship boost (+0.5)
+            bool isRelated = relatedSymbols.Any(sym => 
+                string.Equals(sym, symbolName, StringComparison.OrdinalIgnoreCase) || 
+                string.Equals(sym, className, StringComparison.OrdinalIgnoreCase));
+            if (isRelated)
+            {
+                finalScore += 0.5;
+                expl += ", Relationship: +0.50";
+            }
 
-            // Authentication & Authorization core classes boost
+            // Query-adaptive Folder Boost (+0.2)
+            double folderBoost = 0.0;
+            if (query.Contains("repository", StringComparison.OrdinalIgnoreCase) && (filePath.Contains("repository") || filePath.Contains("persistence")))
+            {
+                folderBoost = 0.2;
+            }
+            else if (query.Contains("controller", StringComparison.OrdinalIgnoreCase) && (filePath.Contains("controller") || filePath.Contains("api")))
+            {
+                folderBoost = 0.2;
+            }
+            else if ((query.Contains("entity", StringComparison.OrdinalIgnoreCase) || query.Contains("model", StringComparison.OrdinalIgnoreCase)) && 
+                     (filePath.Contains("entities") || filePath.Contains("models")))
+            {
+                folderBoost = 0.2;
+            }
+            else if ((query.Contains("react", StringComparison.OrdinalIgnoreCase) || query.Contains("frontend", StringComparison.OrdinalIgnoreCase)) && filePath.Contains("frontend"))
+            {
+                folderBoost = 0.2;
+            }
+
+            if (folderBoost > 0)
+            {
+                finalScore += folderBoost;
+                expl += $", Adapt-Folder: +{folderBoost:F2}";
+            }
+
+            // Core features authentication boost
             if (filePath.Contains("auth") || symbolName.Contains("auth") || 
                 filePath.Contains("jwt") || symbolName.Contains("jwt") || 
                 filePath.Contains("token") || symbolName.Contains("token") || 
-                filePath.Contains("identity") || symbolName.Contains("identity") ||
-                filePath.Contains("login") || symbolName.Contains("login") ||
-                filePath.Contains("register") || symbolName.Contains("register") ||
-                filePath.Contains("user") || symbolName.Contains("user"))
+                filePath.Contains("identity") || symbolName.Contains("identity"))
             {
-                boost += 0.30;
-            }
-
-            // Program / Startup configuration boost
-            if (filePath.EndsWith("program.cs") || filePath.EndsWith("startup.cs") || filePath.Contains("dependencyinjection"))
-            {
-                boost += 0.25;
-            }
-
-            // Controllers, Services, Repositories, Interfaces boost
-            if (symbolName.EndsWith("controller") || filePath.Contains("controller") || filePath.Contains("/controllers/"))
-            {
-                boost += 0.25;
-            }
-            if (symbolName.EndsWith("service") || filePath.Contains("service") || filePath.Contains("/services/"))
-            {
-                boost += 0.20;
-            }
-            if (symbolName.EndsWith("repository") || filePath.Contains("repository") || filePath.Contains("/repositories/"))
-            {
-                boost += 0.20;
-            }
-            if (symbolName.StartsWith("i") && symbolName.Length > 1 && char.IsUpper(symbolName[1]))
-            {
-                boost += 0.15;
-            }
-
-            // Folder Weights: Application, Infrastructure, Domain, Persistence
-            if (filePath.Contains("/application/") || filePath.Contains("/infrastructure/") || 
-                filePath.Contains("/domain/") || filePath.Contains("/persistence/"))
-            {
-                boost += 0.10;
-            }
-
-            // DTOs & Entities
-            if (filePath.Contains("/entities/") || filePath.Contains("/dtos/") || symbolName.EndsWith("dto"))
-            {
-                boost += 0.10;
-            }
-
-            if (boost > 0)
-            {
-                finalScore += boost;
-                expl += $", Boost: +{boost:F2}";
-            }
-
-            // 3. Penalize Noise
-            double penalty = 0.0;
-            bool isNoiseFile = filePath.EndsWith("package.json") || 
-                               filePath.EndsWith("readme.md") || 
-                               filePath.EndsWith("appsettings.json") || 
-                               filePath.EndsWith("appsettings.development.json") || 
-                               filePath.EndsWith(".csproj") || 
-                               filePath.EndsWith(".xml") ||
-                               chunkType == "file" && filePath.Contains("config");
-
-            if (isNoiseFile)
-            {
-                bool queryAsksForConfig = queryKeywords.Any(kw => 
-                    kw.Contains("config") || kw.Contains("setting") || 
-                    kw.Contains("package") || kw.Contains("dependency") || 
-                    kw.Contains("readme") || kw.Contains("project") || kw.Contains("csproj"));
-
-                if (!queryAsksForConfig)
-                {
-                    penalty = -0.40;
-                    finalScore += penalty;
-                    expl += $", Penalty: {penalty:F2}";
-                }
-            }
-
-            // 4. Prefer Code over Configuration/Text
-            if (chunk.ChunkType == "Class" || chunk.ChunkType == "Method" || chunk.ChunkType == "Property")
-            {
-                finalScore += 0.05;
-                expl += $", Structure: +0.05";
+                finalScore += 0.20;
+                expl += ", AuthCore: +0.20";
             }
 
             expl += $", Final Score: {finalScore:F2}";
@@ -456,6 +533,8 @@ public class SemanticRetrievalService : ISemanticRetrievalService
             : new Dictionary<Guid, ParsedMethod>();
 
         var finalOrderedChunks = new List<CodeChunkDto>();
+        double similaritySum = 0.0;
+
         foreach (var r in rankedList.OrderByDescending(x => x.Score).Take(_maxContextChunks))
         {
             var chunk = r.Chunk;
@@ -474,18 +553,9 @@ public class SemanticRetrievalService : ISemanticRetrievalService
             }
             else
             {
-                var lineMatch = System.Text.RegularExpressions.Regex.Match(chunk.Content, @"Lines (\d+)-(\d+)");
-                if (lineMatch.Success)
-                {
-                    startLine = int.Parse(lineMatch.Groups[1].Value);
-                    endLine = int.Parse(lineMatch.Groups[2].Value);
-                }
-                else
-                {
-                    var linesCount = chunk.Content.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None).Length;
-                    startLine = 1;
-                    endLine = Math.Max(1, linesCount);
-                }
+                var linesCount = chunk.Content.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None).Length;
+                startLine = 1;
+                endLine = Math.Max(1, linesCount);
             }
 
             finalOrderedChunks.Add(new CodeChunkDto
@@ -506,12 +576,27 @@ public class SemanticRetrievalService : ISemanticRetrievalService
                 EndLine = endLine,
                 RetrievalExplanation = r.Explanation
             });
+
+            if (scoresMap.TryGetValue(chunk.Id, out var sim))
+            {
+                similaritySum += sim;
+            }
         }
 
-        _logger.LogInformation("Retrieved and ranked {Count} context chunks.", finalOrderedChunks.Count);
-        return finalOrderedChunks;
-    }
+        stopwatch.Stop();
+        double avgSimilarity = finalOrderedChunks.Count > 0 ? (similaritySum / finalOrderedChunks.Count) : 0.0;
 
+        return new DetailedRetrievalResult
+        {
+            Chunks = finalOrderedChunks,
+            CandidateChunks = candidateChunksCount,
+            FilteredChunks = filteredCount + ignoredChunksCount,
+            FinalChunks = finalOrderedChunks.Count,
+            IgnoredReasons = ignoredReasons.Distinct().ToList(),
+            AverageSimilarity = avgSimilarity,
+            RetrievalTime = stopwatch.Elapsed
+        };
+    }
     private string GetMetaValue(string? metadata, string key)
     {
         if (string.IsNullOrEmpty(metadata)) return string.Empty;

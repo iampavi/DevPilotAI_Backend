@@ -341,6 +341,10 @@ public class ProjectChunkingBackgroundWorker : BackgroundService
             jobEntity.CompletedAt = DateTime.UtcNow;
             await context.SaveChangesAsync(cancellationToken);
 
+            // Synchronize project statistics and index
+            var syncer = scope.ServiceProvider.GetRequiredService<IProjectIndexSynchronizationService>();
+            await syncer.SynchronizeProjectAsync(jobItem.ProjectId, cancellationToken);
+
             _logger.LogInformation("Chunking and vector indexing successfully completed for project {ProjectId}.", jobItem.ProjectId);
         }
         catch (Exception ex)

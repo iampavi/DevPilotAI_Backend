@@ -7,6 +7,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using DevPilotAI.Application.Common.Exceptions;
 using DevPilotAI.Application.Common.Interfaces;
 using DevPilotAI.Application.DTOs.Chat;
 using Microsoft.Extensions.Configuration;
@@ -59,16 +60,31 @@ public class GroqChatProvider : IChatProvider
         ChatSettingsDto settings,
         CancellationToken cancellationToken = default)
     {
+        // 1. Validate runtime configurations
+        if (string.IsNullOrEmpty(settings.Provider))
+        {
+            throw new InvalidOperationException("Groq provider is not configured.");
+        }
+        if (string.IsNullOrEmpty(settings.Model))
+        {
+            throw new InvalidOperationException("Groq model is not configured.");
+        }
         if (string.IsNullOrEmpty(_apiKey))
         {
             throw new InvalidOperationException("Groq ApiKey is not configured.");
         }
+        if (string.IsNullOrEmpty(_baseUrl))
+        {
+            throw new InvalidOperationException("Groq BaseUrl is not configured.");
+        }
+
+        var endpoint = $"{_baseUrl.TrimEnd('/')}/chat/completions";
 
         try
         {
             return await _resiliencePipeline.ExecuteAsync(async token =>
             {
-                var request = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl.TrimEnd('/')}/chat/completions");
+                var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
                 request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _apiKey);
 
                 var body = new
@@ -82,10 +98,26 @@ public class GroqChatProvider : IChatProvider
                     presence_penalty = settings.PresencePenalty
                 };
 
-                request.Content = JsonContent.Create(body);
+                var payloadString = JsonSerializer.Serialize(body);
+
+                // 2. Log request details
+                _logger.LogInformation("Groq URL: {Url}", endpoint);
+                _logger.LogInformation("Groq Model: {Model}", settings.Model);
+                _logger.LogInformation("Groq Temperature: {Temperature}", settings.Temperature);
+                _logger.LogInformation("Groq MaxTokens: {MaxTokens}", settings.MaxTokens);
+                _logger.LogInformation("Groq Request Payload: {Payload}", payloadString);
+
+                request.Content = new StringContent(payloadString, System.Text.Encoding.UTF8, "application/json");
 
                 var response = await _httpClient.SendAsync(request, token);
-                response.EnsureSuccessStatusCode();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    // 3. Capture response body on failure
+                    var errorBody = await response.Content.ReadAsStringAsync(token);
+                    _logger.LogError("Failed to call Groq Chat API. Status: {Status}. Body: {Body}", response.StatusCode, errorBody);
+                    throw new ChatProviderException("Groq", endpoint, response.StatusCode, errorBody);
+                }
 
                 var json = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token);
                 var content = json.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? string.Empty;
@@ -98,6 +130,10 @@ public class GroqChatProvider : IChatProvider
                     TokenCount = totalTokens
                 };
             }, cancellationToken);
+        }
+        catch (ChatProviderException)
+        {
+            throw;
         }
         catch (Exception ex)
         {

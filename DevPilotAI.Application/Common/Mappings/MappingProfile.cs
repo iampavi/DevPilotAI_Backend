@@ -47,7 +47,47 @@ public class MappingProfile : Profile
 
         // Chat mappings
         CreateMap<ChatSession, ChatSessionDto>();
-        CreateMap<ChatMessage, ChatMessageDto>();
+        CreateMap<ChatMessage, ChatMessageDto>()
+            .ForMember(dest => dest.ConfidenceScore, opt => opt.Ignore())
+            .ForMember(dest => dest.RetrievedSymbols, opt => opt.Ignore())
+            .ForMember(dest => dest.SourceFiles, opt => opt.Ignore())
+            .ForMember(dest => dest.RetrievedChunksCount, opt => opt.Ignore())
+            .ForMember(dest => dest.SimilarityThreshold, opt => opt.Ignore())
+            .ForMember(dest => dest.ChunkCount, opt => opt.Ignore())
+            .ForMember(dest => dest.ModelUsed, opt => opt.Ignore())
+            .ForMember(dest => dest.Provider, opt => opt.Ignore())
+            .ForMember(dest => dest.ResponseTimeMs, opt => opt.Ignore())
+            .ForMember(dest => dest.PromptMode, opt => opt.Ignore())
+            .AfterMap((src, dest) =>
+            {
+                if (string.IsNullOrEmpty(src.Metadata)) return;
+                try
+                {
+                    var trimmed = src.Metadata.Trim();
+                    if (trimmed.StartsWith("{"))
+                    {
+                        var metaObj = System.Text.Json.JsonSerializer.Deserialize<ChatMessageMetadataDto>(src.Metadata, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        if (metaObj != null)
+                        {
+                            dest.Metadata = System.Text.Json.JsonSerializer.Serialize(metaObj.Sources);
+                            dest.ConfidenceScore = metaObj.ConfidenceScore;
+                            dest.RetrievedSymbols = metaObj.RetrievedSymbols;
+                            dest.SourceFiles = metaObj.SourceFiles;
+                            dest.RetrievedChunksCount = metaObj.RetrievedChunksCount;
+                            dest.SimilarityThreshold = metaObj.SimilarityThreshold;
+                            dest.ChunkCount = metaObj.ChunkCount;
+                            dest.ModelUsed = metaObj.ModelUsed;
+                            dest.Provider = metaObj.Provider;
+                            dest.ResponseTimeMs = metaObj.ResponseTimeMs;
+                            dest.PromptMode = metaObj.PromptMode;
+                        }
+                    }
+                }
+                catch
+                {
+                    // Fallback to default direct mapping of Metadata (since destination inherits it from src.Metadata)
+                }
+            });
 
         // DTO to Entity (Write/Create/Update mappings - validated using MemberList.Source)
         CreateMap<CreateWorkspaceDto, Workspace>(MemberList.Source);

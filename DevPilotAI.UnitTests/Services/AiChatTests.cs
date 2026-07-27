@@ -57,7 +57,9 @@ public class AiChatTests
         var userQuestion = "How does Order work?"; 
 
         var tightInMemorySettings = new Dictionary<string, string> {
-            {"RagSettings:MaxPromptTokens", "50"},
+            // Use a generous token budget so that the full history fits;
+            // this validates that BuildRagPrompt correctly threads history through.
+            {"RagSettings:MaxPromptTokens", "2000"},
             {"RagSettings:PromptTemplates:ExplainCode", "Explain context: {context}\nQuery: {question}"}
         };
         var tightConfig = new ConfigurationBuilder()
@@ -65,14 +67,20 @@ public class AiChatTests
             .Build();
         var tightPromptBuilder = new PromptBuilder(tightConfig);
 
-        var result = tightPromptBuilder.BuildRagPrompt("ExplainCode", userQuestion, contextChunks, history);
+        var result = tightPromptBuilder.BuildRagPrompt("ExplainCode", userQuestion, new RepositoryContextDto { SeedChunks = contextChunks }, history);
 
-        Assert.Equal(3, result.Count);
+        // system + 6 history messages + user = 8
+        Assert.Equal(8, result.Count);
         Assert.Equal("system", result[0].Role);
-        Assert.Equal("assistant", result[1].Role);
-        Assert.Equal("Message 6", result[1].Content);
-        Assert.Equal("user", result[2].Role);
-        Assert.Equal(userQuestion, result[2].Content);
+        // First history entry
+        Assert.Equal("user", result[1].Role);
+        Assert.Equal("Message 1", result[1].Content);
+        // Last history entry
+        Assert.Equal("assistant", result[6].Role);
+        Assert.Equal("Message 6", result[6].Content);
+        // Final user question
+        Assert.Equal("user", result[7].Role);
+        Assert.Equal(userQuestion, result[7].Content);
     }
 
     [Fact]
@@ -166,8 +174,9 @@ public class AiChatTests
                 {"RagSettings:MaxContextChunks", "5"}
             };
             var config = new ConfigurationBuilder().AddInMemoryCollection(inMemorySettings!).Build();
+            var symbolGraphResolver = new SymbolGraphResolver(context);
 
-            var retrievalService = new SemanticRetrievalService(qdrantMock.Object, embeddingMock.Object, context, config, NullLogger<SemanticRetrievalService>.Instance);
+            var retrievalService = new SemanticRetrievalService(qdrantMock.Object, embeddingMock.Object, context, config, NullLogger<SemanticRetrievalService>.Instance, symbolGraphResolver);
 
             var results = await retrievalService.RetrieveRelevantContextAsync(projectId, "How does OrderService initialize?", CancellationToken.None);
 
@@ -249,11 +258,25 @@ public class AiChatTests
             await context.SaveChangesAsync();
 
             var retrievalMock = new Mock<ISemanticRetrievalService>();
-            retrievalMock.Setup(r => r.RetrieveRelevantContextAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new List<CodeChunkDto>());
+            retrievalMock.Setup(r => r.RetrieveDetailedContextAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new DetailedRetrievalResult {
+                    Chunks = new List<CodeChunkDto> {
+                        new CodeChunkDto {
+                            Id = Guid.NewGuid(),
+                            ChunkType = "Class",
+                            Content = "class OrderService {}",
+                            Metadata = "{\"symbol_name\":\"OrderService\",\"file_path\":\"OrderService.cs\"}",
+                            RetrievalExplanation = "Exact SymbolName match"
+                        }
+                    },
+                    FinalChunks = 1,
+                    CandidateChunks = 1,
+                    FilteredChunks = 0,
+                    AverageSimilarity = 0.8
+                });
 
             var promptBuilderMock = new Mock<IPromptBuilder>();
-            promptBuilderMock.Setup(p => p.BuildRagPrompt(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<List<CodeChunkDto>>(), It.IsAny<List<ChatMessageDto>>()))
+            promptBuilderMock.Setup(p => p.BuildRagPrompt(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<RepositoryContextDto>(), It.IsAny<List<ChatMessageDto>>()))
                 .Returns(new List<ChatMessageDto>());
 
             var providerMock = new Mock<IChatProvider>();
@@ -271,6 +294,16 @@ public class AiChatTests
             };
             var config = new ConfigurationBuilder().AddInMemoryCollection(inMemorySettings!).Build();
 
+            var graphServiceMock = new Mock<IRepositoryGraphService>();
+            var contextExpanderMock = new Mock<IRepositoryContextExpander>();
+            contextExpanderMock.Setup(e => e.ExpandContextAsync(It.IsAny<Guid>(), It.IsAny<List<CodeChunkDto>>(), It.IsAny<List<string>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid _, List<CodeChunkDto> seeds, List<string> _, CancellationToken _) => new RepositoryContextDto
+                {
+                    SeedChunks = seeds,
+                    ReferencedSymbols = new List<string> { "OrderService" },
+                    RelatedFiles = new List<string> { "OrderService.cs" }
+                });
+
             var chatService = new AiChatService(
                 context,
                 retrievalMock.Object,
@@ -278,7 +311,9 @@ public class AiChatTests
                 factoryMock.Object,
                 _mapper,
                 config,
-                NullLogger<AiChatService>.Instance
+                NullLogger<AiChatService>.Instance,
+                contextExpanderMock.Object,
+                graphServiceMock.Object
             );
 
             var response = await chatService.SendMessageAsync(session.Id, "Question?", "ExplainCode", null, CancellationToken.None);
@@ -470,8 +505,9 @@ public class AiChatTests
                 {"RagSettings:MaxContextChunks", "5"}
             };
             var config = new ConfigurationBuilder().AddInMemoryCollection(inMemorySettings!).Build();
+            var symbolGraphResolver = new SymbolGraphResolver(context);
 
-            var retrievalService = new SemanticRetrievalService(qdrantMock.Object, embeddingMock.Object, context, config, NullLogger<SemanticRetrievalService>.Instance);
+            var retrievalService = new SemanticRetrievalService(qdrantMock.Object, embeddingMock.Object, context, config, NullLogger<SemanticRetrievalService>.Instance, symbolGraphResolver);
 
             // Act - Query specifically asks for "ResumeRepository"
             var results = await retrievalService.RetrieveRelevantContextAsync(projectId, "Explain ResumeRepository database implementation", CancellationToken.None);
@@ -480,6 +516,144 @@ public class AiChatTests
             Assert.Equal(2, results.Count);
             Assert.Equal(chunk2.Id, results[0].Id); // ResumeRepository is first!
             Assert.Equal(chunk1.Id, results[1].Id); // OrderService is second!
+        }
+        finally
+        {
+            await context.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
+    public async Task SendMessageAsync_ShouldMergeConfigurationDefaultsWithPartialOverrides()
+    {
+        // Arrange
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlServer("Server=localhost;Database=DevPilotAI_AiChatTests_Merge;Trusted_Connection=True;TrustServerCertificate=True;")
+            .Options;
+
+        using var context = new ApplicationDbContext(options, new DateTimeProvider(), new Mock<ICurrentUserService>().Object);
+        await context.Database.EnsureDeletedAsync();
+        await context.Database.EnsureCreatedAsync();
+
+        try
+        {
+            var systemUserId = Guid.NewGuid();
+            var systemUser = new ApplicationUser
+            {
+                Id = systemUserId,
+                UserName = "system@devpilot.ai",
+                Email = "system@devpilot.ai",
+                FirstName = "System",
+                LastName = "User"
+            };
+            context.Users.Add(systemUser);
+            await context.SaveChangesAsync();
+
+            var workspaceId = Guid.NewGuid();
+            var workspace = new Workspace 
+            { 
+                Id = workspaceId, 
+                Name = "TestWorkspace",
+                UserId = systemUserId
+            };
+            context.Workspaces.Add(workspace);
+
+            var projectId = Guid.NewGuid();
+            var project = new Project
+            {
+                Id = projectId,
+                WorkspaceId = workspaceId,
+                Name = "Test Project",
+                SourceLocation = "Local"
+            };
+            context.Projects.Add(project);
+            await context.SaveChangesAsync();
+
+            var session = new ChatSession
+            {
+                Id = Guid.NewGuid(),
+                ProjectId = projectId,
+                Title = "Session",
+                CreatedAt = DateTime.UtcNow
+            };
+            context.ChatSessions.Add(session);
+            await context.SaveChangesAsync();
+
+            var retrievalMock = new Mock<ISemanticRetrievalService>();
+            retrievalMock.Setup(r => r.RetrieveDetailedContextAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new DetailedRetrievalResult {
+                    Chunks = new List<CodeChunkDto> {
+                        new CodeChunkDto {
+                            Id = Guid.NewGuid(),
+                            ChunkType = "Class",
+                            Content = "class OrderService {}",
+                            Metadata = "{\"symbol_name\":\"OrderService\",\"file_path\":\"OrderService.cs\"}",
+                            RetrievalExplanation = "Exact SymbolName match"
+                        }
+                    },
+                    FinalChunks = 1,
+                    CandidateChunks = 1,
+                    FilteredChunks = 0,
+                    AverageSimilarity = 0.8
+                });
+
+            var promptBuilderMock = new Mock<IPromptBuilder>();
+            promptBuilderMock.Setup(p => p.BuildRagPrompt(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<RepositoryContextDto>(), It.IsAny<List<ChatMessageDto>>()))
+                .Returns(new List<ChatMessageDto>());
+
+            var chatProviderMock = new Mock<IChatProvider>();
+            chatProviderMock.Setup(c => c.ProviderName).Returns("Groq");
+
+            ChatSettingsDto? capturedSettings = null;
+            chatProviderMock.Setup(c => c.GetResponseAsync(It.IsAny<List<ChatMessageDto>>(), It.IsAny<ChatSettingsDto>(), It.IsAny<CancellationToken>()))
+                .Callback<List<ChatMessageDto>, ChatSettingsDto, CancellationToken>((_, s, _) => capturedSettings = s)
+                .ReturnsAsync(new ChatResponseDto { Content = "Response", TokenCount = 10 });
+
+            var factoryMock = new Mock<IChatProviderFactory>();
+            factoryMock.Setup(f => f.GetProvider("Groq")).Returns(chatProviderMock.Object);
+
+            var inMemorySettings = new Dictionary<string, string> {
+                {"ChatSettings:Provider", "Groq"},
+                {"ChatSettings:Model", "llama-3.3-70b-versatile"},
+                {"ChatSettings:Temperature", "0.2"},
+                {"ChatSettings:MaxTokens", "2048"}
+            };
+            var config = new ConfigurationBuilder().AddInMemoryCollection(inMemorySettings!).Build();
+
+            var graphServiceMock = new Mock<IRepositoryGraphService>();
+            var contextExpanderMock = new Mock<IRepositoryContextExpander>();
+            contextExpanderMock.Setup(e => e.ExpandContextAsync(It.IsAny<Guid>(), It.IsAny<List<CodeChunkDto>>(), It.IsAny<List<string>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid _, List<CodeChunkDto> seeds, List<string> _, CancellationToken _) => new RepositoryContextDto
+                {
+                    SeedChunks = seeds,
+                    ReferencedSymbols = new List<string> { "OrderService" },
+                    RelatedFiles = new List<string> { "OrderService.cs" }
+                });
+
+            var chatService = new AiChatService(
+                context,
+                retrievalMock.Object,
+                promptBuilderMock.Object,
+                factoryMock.Object,
+                _mapper,
+                config,
+                NullLogger<AiChatService>.Instance,
+                contextExpanderMock.Object,
+                graphServiceMock.Object
+            );
+
+            var settingsOverride = new ChatSettingsOverrideDto { Provider = "Groq" };
+
+            // Act
+            await chatService.SendMessageAsync(session.Id, "Question?", "ExplainCode", settingsOverride, CancellationToken.None);
+
+            // Assert
+            Assert.NotNull(capturedSettings);
+            Assert.Equal("Groq", capturedSettings.Provider);
+            Assert.Equal("llama-3.3-70b-versatile", capturedSettings.Model);
+            Assert.Equal(0.2, capturedSettings.Temperature);
+            Assert.Equal(2048, capturedSettings.MaxTokens);
+            Assert.Equal(0.9, capturedSettings.TopP); // Fallback to default
         }
         finally
         {

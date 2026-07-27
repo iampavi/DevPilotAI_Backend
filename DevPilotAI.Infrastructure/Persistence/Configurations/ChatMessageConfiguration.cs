@@ -18,7 +18,7 @@ public class ChatMessageConfiguration : IEntityTypeConfiguration<ChatMessage>
             .IsRequired();
 
         builder.Property(m => m.Metadata)
-            .HasMaxLength(4000);
+            .HasColumnType("nvarchar(max)");
 
         // Relation: ChatSession -> ChatMessages
         builder.HasOne(m => m.ChatSession)

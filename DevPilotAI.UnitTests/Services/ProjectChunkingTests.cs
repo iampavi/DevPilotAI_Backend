@@ -72,6 +72,7 @@ public class ProjectChunkingTests
         services.AddSingleton(_embeddingMock.Object);
         services.AddSingleton(_qdrantMock.Object);
         services.AddSingleton<IChunkingScheduler>(new Mock<IChunkingScheduler>().Object);
+        services.AddSingleton(new Mock<IProjectIndexSynchronizationService>().Object);
 
         var serviceProvider = services.BuildServiceProvider();
 
